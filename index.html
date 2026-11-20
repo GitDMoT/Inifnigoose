@@ -1,0 +1,1356 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>[hidden]{display:none!important}body{margin:0;font:14px system-ui,sans-serif}</style></head><body>
+<title>Long Goose</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap">
+<style>
+/* Layout: a portrait phone stage (full screen on phones, a framed 9:19.5 column on wide screens) holding the canvas world, with HUD pills pinned to its top corners. */
+:root {
+  --mustard: #DCA34B;
+  --ink: #3B2416;
+  --cream: #F3E4C9;
+  --beak: #E58A42;
+  --crust: #C27630;
+  --font-display: "Fredoka", "Baloo 2", "Nunito", ui-rounded, system-ui, sans-serif;
+  color-scheme: light;
+}
+html, body { height: 100%; margin: 0; overflow: hidden; background: var(--mustard); color: var(--ink); }
+#stage { position: fixed; inset: 0; overflow: hidden; background: #A9DAEE; }
+#stage.framed { inset: auto; border: 3px solid var(--ink); border-radius: 30px; box-shadow: 0 18px 50px rgba(59,36,22,0.35); }
+canvas#c { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+canvas#c.held { cursor: grabbing; }
+.hud {
+  position: absolute; z-index: 2;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  left: calc(env(safe-area-inset-left, 0px) + 16px);
+  display: flex; gap: 8px; flex-wrap: wrap;
+  font-family: var(--font-display); font-weight: 600; font-size: 16px;
+  pointer-events: none; font-variant-numeric: tabular-nums;
+  right: calc(env(safe-area-inset-right, 0px) + 120px);
+}
+.pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: var(--cream); border: 2.5px solid var(--ink); border-radius: 999px;
+  padding: 5px 13px 5px 9px; line-height: 1;
+}
+.pill svg { width: 20px; height: 20px; flex: none; }
+.pill small { font-weight: 500; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; opacity: .7; }
+.ctrl {
+  position: absolute; z-index: 2;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  right: calc(env(safe-area-inset-right, 0px) + 16px);
+  display: flex; gap: 8px;
+}
+.ctrl button {
+  width: 40px; height: 40px; border-radius: 50%;
+  background: var(--cream); border: 2.5px solid var(--ink); color: var(--ink);
+  display: grid; place-items: center; cursor: pointer; padding: 0;
+}
+.ctrl button:hover { background: #fff3dc; }
+.ctrl button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+.ctrl svg { width: 20px; height: 20px; }
+.ctrl svg[hidden] { display: none; }
+.tilt { width: 40px; height: 40px; display: grid; place-items: center; color: var(--ink); transition: transform .1s linear; }
+.tilt[hidden] { display: none; }
+.tilt svg { width: 24px; height: 24px; }
+
+</style>
+
+<div id="stage">
+<canvas id="c" aria-label="A goose with a stretchy neck. Hold and drag to steer its head upward toward bread."></canvas>
+
+<div class="hud" aria-live="polite">
+  <span class="pill" title="Bread eaten">
+    <svg viewBox="-12 -12 24 24" aria-hidden="true"><path d="M-8 9 L-8 0 C-11 -1 -10.5 -9 -5 -9.5 C-2 -11 2 -11 5 -9.5 C10.5 -9 11 -1 8 0 L8 9 Z" fill="#C27630" stroke="#3B2416" stroke-width="2" stroke-linejoin="round"/><path d="M-5.5 7 L-5.5 -0.5 C-7.5 -1.5 -7 -7 -3.5 -7 C-1.5 -8 1.5 -8 3.5 -7 C7 -7 7.5 -1.5 5.5 -0.5 L5.5 7 Z" fill="#F7DC9A"/></svg>
+    <span id="breadCount">0</span>
+  </span>
+  <span class="pill" title="Neck length"><small>neck</small> <span id="neckLen">0.30 m</span></span>
+  <span class="pill" title="Height of the head above the grass"><small>height</small> <span id="height">0.1 m</span></span>
+</div>
+
+<div class="ctrl">
+  <button id="muteBtn" type="button" aria-label="Mute sound" title="Sound on">
+    <svg id="icoOn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/><path d="M19 6a8.5 8.5 0 0 1 0 12"/></svg>
+    <svg id="icoOff" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" hidden><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M17 9l5 6M22 9l-5 6"/></svg>
+  </button>
+  <span class="tilt" id="tiltIco" hidden title="Tilt steering on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2" stroke-linecap="round"/></svg></span>
+  <button id="resetBtn" type="button" aria-label="Start over" title="Start over">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4.5h4.5"/></svg>
+  </button>
+</div>
+
+</div>
+
+<script>
+(() => {
+'use strict';
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const stage = document.getElementById('stage');
+const breadCountEl = document.getElementById('breadCount');
+const neckLenEl = document.getElementById('neckLen');
+const heightEl = document.getElementById('height');
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const C = {
+  bg: '#DCA34B', ink: '#3B2416', cream: '#F3E4C9',
+  beak: '#E58A42', beakDark: '#C95B2D', mouth: '#6E2717', patch: '#DCC6A3',
+  crust: '#C27630', crumb: '#F7DC9A', hole: '#E3BC6E',
+  hill: '#A9D083', treeFar: '#7DB264', grass: '#93C66E', grassDark: '#6FA855', path: '#EAD6A6',
+  pond: '#7CC0D8', wood: '#9A5B32', leaf: '#5F9F4E', lampGlow: '#FBE7A1'
+};
+const SKY = [[0,'#E4F3F1'],[1200,'#A9DAEE'],[5000,'#7DBFE6'],[11000,'#8CC2E2'],[16000,'#F2CF7A'],[21000,'#EC9A52'],[27000,'#B9586A'],[34000,'#4E3A6E'],[42000,'#1E2148'],[60000,'#0D1030']];
+const CLOUD = [[0,'#FFFFFF'],[11000,'#FFFFFF'],[17000,'#FFF0D2'],[22000,'#F8C9A0'],[28000,'#C98AA0'],[36000,'#5D5486'],[46000,'#2F3263']];
+const CONE = Math.PI / 3;        // steering limit: 60 degrees either side of straight up
+const NECK = 100, HALF = 50, CH = 40;
+const UNITS_PER_M = 2000;          // 100 units of neck width = 5 cm
+
+let W = 0, H = 0, DPR = 1, s0 = 1;
+let pts, chunks, grown, head, vel, ang, tilt, tiltT, facing, facingT, lookTimer;
+let cam, phase, t, eaten, breads, particles, bulges, texts;
+let honkT, honkDur, chompT, nextHonk, dragging, pointer, downInfo, lastDragEnd, everDragged;
+let stretchCharge, spawnQueue, toastTimer, hintA, zoomPunch, groundY, bottomY, neckM, heightM;
+// Counter growth in metres per second at full climbing speed: starts slow and every bread speeds it up.
+// A steady player (about a piece every second) reaches 500 m at roughly 45 s.
+function growthRate(n) { return 0.1 + 0.19 * n + 0.0105 * n * n; }
+function mpu() { return growthRate(eaten) / (0.85 * maxSpeed()); }
+
+/* ---------- geometry helpers ---------- */
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const lerp = (a, b, k) => a + (b - a) * k;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const rand = (a, b) => a + Math.random() * (b - a);
+const easeOutCubic = p => 1 - Math.pow(1 - p, 3);
+const easeOutBack = p => { const c = 1.7; return 1 + (c + 1) * Math.pow(p - 1, 3) + c * Math.pow(p - 1, 2); };
+function angDiff(a, b) { let d = b - a; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; }
+
+function addPt(x, y) {
+  const i = pts.length;
+  pts.push({ x, y });
+  const k = Math.floor(i / CH);
+  if (!chunks[k]) {
+    const a = Math.max(0, i - 1);
+    let fa = a, acc = 0;
+    while (fa > 0 && acc < 75) { acc += dist(pts[fa], pts[fa - 1]); fa--; }
+    chunks[k] = { a, fa, minx: Infinity, miny: Infinity, maxx: -Infinity, maxy: -Infinity };
+    if (i > 0) ext(chunks[k], pts[i - 1]);
+  }
+  ext(chunks[k], pts[i]);
+}
+function ext(c, p) { c.minx = Math.min(c.minx, p.x); c.maxx = Math.max(c.maxx, p.x); c.miny = Math.min(c.miny, p.y); c.maxy = Math.max(c.maxy, p.y); }
+
+// Point at arc length sBack behind the head, following the neck.
+function pointBack(sBack) {
+  let prev = head, acc = 0;
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i], d = dist(prev, p);
+    if (d > 0 && acc + d >= sBack) { const k = (sBack - acc) / d; return { x: lerp(prev.x, p.x, k), y: lerp(prev.y, p.y, k) }; }
+    acc += d; prev = p;
+  }
+  return { x: prev.x, y: prev.y };
+}
+
+/* ---------- camera ---------- */
+const zoomFactor = n => n === 0 ? 1 : Math.max(0.42, 0.62 * Math.pow(0.975, n - 1));
+function sTarget() { return Math.max(14 / NECK, s0 * zoomFactor(eaten)); }
+function toScreen(x, y) { return { x: (x - cam.x) * cam.s + W / 2, y: (y - cam.y) * cam.s + H / 2 }; }
+function toWorld(x, y) { return { x: (x - W / 2) / cam.s + cam.x, y: (y - H / 2) / cam.s + cam.y }; }
+function introCam() { return { x: 0, y: (0.5 - 0.42) * H / s0 }; }
+function maxSpeed() { return 430 * Math.pow(s0 / sTarget(), 0.95) * Math.min(3.5, 1 + 0.07 * eaten); }
+
+/* ---------- setup ---------- */
+function resize() {
+  const old = s0;
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  const vw = innerWidth, vh = innerHeight;
+  let w = vw, h = vh;
+  const framed = vw / vh > 0.66;            // wide screen: show a phone-shaped column
+  if (framed) { h = vh - 32; w = Math.min(vw - 32, Math.round(h * 9 / 19.5)); }
+  stage.classList.toggle('framed', framed);
+  Object.assign(stage.style, framed
+    ? { width: w + 'px', height: h + 'px', left: Math.round((vw - w) / 2) + 'px', top: Math.round((vh - h) / 2) + 'px' }
+    : { width: '', height: '', left: '', top: '' });
+  W = w; H = h;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  s0 = 0.26 * Math.min(W, H * 0.55) / NECK;
+  if (cam) {
+    cam.s *= s0 / old;
+    if (phase === 'intro' || phase === 'first') { const ic = introCam(); cam.x = ic.x; cam.y = ic.y; }
+  }
+}
+
+function reset() {
+  groundY = 0.28 * H / s0; bottomY = 0.58 * H / s0;
+  pts = []; chunks = [];
+  addPt(0, 200000); addPt(0, 600); addPt(0, 0);
+  grown = 0; neckM = 0.30; heightM = 0.25;
+  head = { x: 0, y: 0 }; vel = { x: 0, y: 0 };
+  ang = 0; tilt = 0; tiltT = 0; facing = 1; facingT = 1; lookTimer = 1.4;
+  const ic = introCam();
+  cam = { x: ic.x, y: ic.y, s: s0 };
+  phase = 'intro'; t = 0; eaten = 0;
+  breads = []; particles = []; bulges = []; texts = [];
+  honkT = -1; honkDur = 0.32; chompT = -1; nextHonk = 1.3;
+  dragging = false; pointer = null; downInfo = null; lastDragEnd = -10; everDragged = false;
+  stretchCharge = 0; spawnQueue = []; toastTimer = 0; hintA = 0; zoomPunch = 0;
+  started = false; aim = aimT = 0; slide = null;
+  resetMusic();
+  updateHud();
+}
+
+function updateHud() {
+  breadCountEl.textContent = eaten;
+  neckLenEl.textContent = fmtLen(neckM);
+  heightEl.textContent = fmtLen(heightM);
+}
+function fmtLen(m) { return m < 1 ? m.toFixed(2) + ' m' : m < 100 ? m.toFixed(1) + ' m' : m < 1000 ? Math.round(m) + ' m' : (m / 1000).toFixed(2) + ' km'; }
+
+/* ---------- bread ---------- */
+function breadR() { return 45 * Math.pow(s0 / sTarget(), 0.62); }
+function makeFirstBread() {
+  const to = { x: 40, y: -(0.42 - 0.22) * H / s0 };
+  to.y = Math.min(to.y, -230);
+  const from = { x: (W / 2) / s0 + 140, y: to.y - 70 };
+  breads.push({ bx: to.x, by: to.y, x: from.x, y: from.y, r: 45, rot: 0, ph: rand(0, 6), born: t,
+    enter: { from, to, t0: t, dur: 2.6 }, type: 'toast' });
+}
+function spawnBread() {
+  const s = sTarget();
+  const viewH = H / s, halfW = W / 2 / s;
+  const r = breadR();
+  // always above the top of the screen (now, and after any zoom-out), inside the cone the neck can reach
+  const top = Math.min(cam.y - H / 2 / cam.s, head.y - 0.2 * H / s - H / 2 / s);
+  let best = null;
+  for (let tries = 0; tries < 14; tries++) {
+    const y = top - r * 2.2 - rand(0, 0.9) * viewH;
+    const spread = Math.min(halfW * 0.8, (head.y - y) * Math.tan(CONE) * 0.7);
+    const p = { x: head.x + rand(-1, 1) * spread, y };
+    const ok = breads.every(b => Math.hypot(b.bx - p.x, b.by - p.y) > r * 3.2);
+    if (ok) { best = p; break; }
+    best = p;
+  }
+  breads.push({ bx: best.x, by: best.y, x: best.x, y: best.y, r, rot0: rand(-0.35, 0.35), ph: rand(0, 6), type: pickType() });
+}
+function breadCap() { return Math.min(6, 3 + Math.floor(eaten / 6)); }
+
+/* ---------- audio ---------- */
+let AC = null, master = null, muted = false, stretch = null, noiseBuf = null;
+function initAudio() {
+  if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+  const Ctor = window.AudioContext || window.webkitAudioContext;
+  if (!Ctor) return;
+  AC = new Ctor();
+  const comp = AC.createDynamicsCompressor();
+  comp.threshold.value = -14; comp.ratio.value = 4;
+  master = AC.createGain(); master.gain.value = muted ? 0 : 0.75;
+  master.connect(comp); comp.connect(AC.destination);
+  noiseBuf = AC.createBuffer(1, AC.sampleRate * 0.5, AC.sampleRate);
+  const d = noiseBuf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  // continuous rubbery stretch voice
+  const o = AC.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 110;
+  const o2 = AC.createOscillator(); o2.type = 'square'; o2.frequency.value = 166;
+  const lfo = AC.createOscillator(); lfo.frequency.value = 22;
+  const lg = AC.createGain(); lg.gain.value = 9;
+  lfo.connect(lg); lg.connect(o.frequency); lg.connect(o2.frequency);
+  const bp = AC.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 4.5; bp.frequency.value = 800;
+  const g2 = AC.createGain(); g2.gain.value = 0.3;
+  o.connect(bp); o2.connect(g2); g2.connect(bp);
+  const g = AC.createGain(); g.gain.value = 0;
+  bp.connect(g); g.connect(master);
+  o.start(); o2.start(); lfo.start();
+  stretch = { o, o2, lfo, bp, g };
+  initMusic();
+}
+function updateStretchSound(frac) {
+  if (!AC || !stretch) return;
+  const n = AC.currentTime;
+  stretch.g.gain.setTargetAtTime(0.6 * frac, n, 0.05);
+  const f = 92 + 110 * frac + 150 * stretchCharge;
+  stretch.o.frequency.setTargetAtTime(f, n, 0.06);
+  stretch.o2.frequency.setTargetAtTime(f * 1.51, n, 0.06);
+  stretch.bp.frequency.setTargetAtTime(520 + 380 * frac + 1000 * stretchCharge, n, 0.08);
+  stretch.lfo.frequency.setTargetAtTime(16 + 18 * frac, n, 0.1);
+}
+function sfxHonk(pitch = 1) {
+  if (!AC) return;
+  const n = AC.currentTime, dur = 0.3;
+  const out = AC.createGain();
+  out.gain.setValueAtTime(0.0001, n);
+  out.gain.exponentialRampToValueAtTime(0.55, n + 0.025);
+  out.gain.setValueAtTime(0.5, n + dur * 0.6);
+  out.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+  const shaper = AC.createWaveShaper();
+  const curve = new Float32Array(256);
+  for (let i = 0; i < 256; i++) { const x = i / 128 - 1; curve[i] = Math.tanh(x * 3.2); }
+  shaper.curve = curve;
+  const f1 = AC.createBiquadFilter(); f1.type = 'bandpass'; f1.frequency.value = 900; f1.Q.value = 3;
+  const f2 = AC.createBiquadFilter(); f2.type = 'bandpass'; f2.frequency.value = 1700; f2.Q.value = 4;
+  const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3200;
+  const mix = AC.createGain(); mix.gain.value = 1.6;
+  [[ 'sawtooth', 1 ], [ 'square', 1.008 ]].forEach(([type, det]) => {
+    const o = AC.createOscillator(); o.type = type;
+    const fq = o.frequency;
+    fq.setValueAtTime(250 * pitch * det, n);
+    fq.linearRampToValueAtTime(410 * pitch * det, n + 0.045);
+    fq.exponentialRampToValueAtTime(360 * pitch * det, n + dur * 0.65);
+    fq.exponentialRampToValueAtTime(240 * pitch * det, n + dur);
+    o.connect(shaper); o.start(n); o.stop(n + dur + 0.02);
+  });
+  shaper.connect(f1); shaper.connect(f2); shaper.connect(lp);
+  f1.connect(mix); f2.connect(mix);
+  const lpg = AC.createGain(); lpg.gain.value = 0.25; lp.connect(lpg); lpg.connect(out);
+  mix.connect(out); out.connect(master);
+}
+function sfxGobble() {
+  if (!AC) return;
+  const n = AC.currentTime;
+  for (let i = 0; i < 3; i++) {
+    const t0 = n + i * 0.085;
+    const src = AC.createBufferSource(); src.buffer = noiseBuf;
+    const bp = AC.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 2200 - i * 300; bp.Q.value = 1.2;
+    const g = AC.createGain();
+    g.gain.setValueAtTime(0.5, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.05);
+    src.connect(bp); bp.connect(g); g.connect(master); src.start(t0, Math.random() * 0.3, 0.07);
+    const o = AC.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(560 - i * 60, t0); o.frequency.exponentialRampToValueAtTime(150, t0 + 0.075);
+    const og = AC.createGain(); og.gain.setValueAtTime(0.45, t0); og.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.08);
+    o.connect(og); og.connect(master); o.start(t0); o.stop(t0 + 0.09);
+  }
+  const t1 = n + 0.31;
+  const o = AC.createOscillator(); o.type = 'sine';
+  o.frequency.setValueAtTime(320, t1); o.frequency.exponentialRampToValueAtTime(65, t1 + 0.2);
+  const og = AC.createGain(); og.gain.setValueAtTime(0.0001, t1); og.gain.exponentialRampToValueAtTime(0.75, t1 + 0.02); og.gain.exponentialRampToValueAtTime(0.0001, t1 + 0.22);
+  o.connect(og); og.connect(master); o.start(t1); o.stop(t1 + 0.24);
+}
+function sfxPop() {
+  if (!AC) return;
+  const n = AC.currentTime;
+  const o = AC.createOscillator(); o.type = 'sine';
+  o.frequency.setValueAtTime(620, n); o.frequency.exponentialRampToValueAtTime(1250, n + 0.08);
+  const g = AC.createGain(); g.gain.setValueAtTime(0.0001, n); g.gain.exponentialRampToValueAtTime(0.18, n + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, n + 0.12);
+  o.connect(g); g.connect(master); o.start(n); o.stop(n + 0.13);
+}
+
+
+/* ---------- climbing music: uplifting trance with a goose in the band ---------- */
+let STEP = 60 / 138 / 4;   // 138 BPM, then 142 after the drop
+const mf = m => 440 * Math.pow(2, (m - 69) / 12);
+// vi - IV - I - V in C (Am F C G), two bars each
+const CHORDS = [
+  { pad: [57, 60, 64, 69], arp: [69, 72, 76, 81], bass: 45, stab: 57 },
+  { pad: [53, 57, 60, 65], arp: [65, 69, 72, 77], bass: 41, stab: 53 },
+  { pad: [55, 60, 64, 67], arp: [67, 72, 76, 79], bass: 48, stab: 60 },
+  { pad: [55, 59, 62, 67], arp: [67, 71, 74, 79], bass: 43, stab: 55 }
+];
+const ARP = [0, 1, 2, 3, 2, 1, 3, 2, 0, 2, 1, 3, 2, 3, 1, 2];
+const MELODY = new Map();
+[[0,76,3],[3,74,3],[6,72,4],[10,76,2],[12,81,4],[16,79,6],[22,76,4],[26,74,6],
+ [32,72,3],[35,74,3],[38,76,4],[42,77,2],[44,81,4],[48,79,6],[54,77,4],[58,76,6],
+ [64,76,3],[67,79,3],[70,84,4],[74,83,2],[76,79,4],[80,76,6],[86,79,4],[90,76,6],
+ [96,74,3],[99,76,3],[102,79,4],[106,83,2],[108,86,4],[112,83,6],[118,81,4],[122,79,6]
+].forEach(([s, m, l]) => MELODY.set(s, { m, l }));
+// neck length (metres) where each layer of the first track fades in
+const LAYERS = { pad: [3, 8], arp: [25, 40], drums: [80, 110], stab: [80, 110], lead: [180, 230] };
+const BUILD_AT = 450, DROP_AT = 500;
+// second track: euphoric supersaw lead over a rolling psy bass (A minor, 142 BPM)
+const MELODY2 = new Map();
+[[0,76,2],[2,79,2],[4,81,6],[10,84,2],[12,83,4],[16,81,6],[22,79,2],[24,76,8],
+ [32,77,2],[34,81,2],[36,84,6],[42,86,2],[44,84,4],[48,81,6],[54,79,2],[56,77,8],
+ [64,79,2],[66,84,2],[68,88,6],[74,86,2],[76,84,4],[80,83,6],[86,84,2],[88,79,8],
+ [96,79,2],[98,83,2],[100,86,6],[106,88,2],[108,86,4],[112,83,4],[116,81,4],[120,79,8]
+].forEach(([s, m, l]) => MELODY2.set(s, { m, l }));
+let mus = null, shaperCurve = null;
+
+function makeIR(sec) {
+  const len = Math.floor(AC.sampleRate * sec), b = AC.createBuffer(2, len, AC.sampleRate);
+  for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2); }
+  return b;
+}
+function initMusic() {
+  shaperCurve = new Float32Array(256);
+  for (let i = 0; i < 256; i++) { const x = i / 128 - 1; shaperCurve[i] = Math.tanh(x * 3); }
+  const bus = AC.createGain(); bus.gain.value = 0.5; bus.connect(master);
+  const conv = AC.createConvolver(); conv.buffer = makeIR(2.8);
+  const revOut = AC.createGain(); revOut.gain.value = 0.5; conv.connect(revOut); revOut.connect(bus);
+  const dl = AC.createDelay(1); dl.delayTime.value = STEP * 3;
+  const fb = AC.createGain(); fb.gain.value = 0.36;
+  const dlf = AC.createBiquadFilter(); dlf.type = 'lowpass'; dlf.frequency.value = 2400;
+  dl.connect(dlf); dlf.connect(fb); fb.connect(dl);
+  const dlOut = AC.createGain(); dlOut.gain.value = 0.45; dlf.connect(dlOut); dlOut.connect(bus);
+  const mk = (rev, del) => {
+    const g = AC.createGain(); g.gain.value = 0; g.connect(bus);
+    if (rev) { const s = AC.createGain(); s.gain.value = rev; g.connect(s); s.connect(conv); }
+    if (del) { const s = AC.createGain(); s.gain.value = del; g.connect(s); s.connect(dl); }
+    return g;
+  };
+  const pad = mk(0.8, 0);
+  const duck = AC.createGain(); duck.connect(pad);
+  // riser for the build: swept noise plus a climbing saw
+  const rs = AC.createBufferSource(); rs.buffer = noiseBuf; rs.loop = true;
+  const rbp = AC.createBiquadFilter(); rbp.type = 'bandpass'; rbp.Q.value = 1.4; rbp.frequency.value = 400;
+  const ro = AC.createOscillator(); ro.type = 'sawtooth'; ro.frequency.value = 110;
+  const rlp = AC.createBiquadFilter(); rlp.type = 'lowpass'; rlp.frequency.value = 600;
+  const rog = AC.createGain(); rog.gain.value = 0.25;
+  const rg = mk(0.6, 0);
+  rs.connect(rbp); rbp.connect(rg); ro.connect(rlp); rlp.connect(rog); rog.connect(rg);
+  rs.start(); ro.start();
+  mus = {
+    bus, conv, dl, pad, duck, arp: mk(0.35, 0.55), drums: mk(0.06, 0), bass: mk(0.04, 0), stab: mk(0.45, 0.35), lead: mk(0.45, 0.4),
+    snare: mk(0.3, 0), riser: { rbp, ro, rlp, rg },
+    kick2: mk(0.03, 0), bass2: mk(0.02, 0), perc2: mk(0.1, 0), lead2: mk(0.55, 0.5),
+    mode: 't1', dropReady: false,
+    step: 0, next: AC.currentTime + 0.1, lv: { pad: 0, arp: 0, drums: 0, stab: 0, lead: 0 }
+  };
+  setInterval(scheduleMusic, 25);
+}
+function resetMusic() {
+  if (!mus) return;
+  const n = AC.currentTime;
+  mus.mode = 't1'; mus.dropReady = false; mus.step = 0;
+  STEP = 60 / 138 / 4;
+  mus.dl.delayTime.setTargetAtTime(STEP * 3, n, 0.05);
+  for (const g of [mus.kick2, mus.bass2, mus.perc2, mus.lead2, mus.snare, mus.riser.rg]) { g.gain.cancelScheduledValues(n); g.gain.setTargetAtTime(0, n, 0.15); }
+}
+function updateMusic(dt) {
+  if (!mus) return;
+  const m = neckM, n = AC.currentTime;
+  if (mus.mode === 't1' && phase === 'grow' && m >= BUILD_AT) mus.mode = 'build';
+  if (mus.mode === 'build' && m >= DROP_AT) mus.dropReady = true;   // the drop lands on the next bar line
+  for (const key in LAYERS) {
+    const [a, b] = LAYERS[key];
+    let target = phase === 'grow' ? smooth(a, b, m) : 0;
+    if (mus.mode === 'build') { if (key === 'drums') target = 0; if (key === 'lead') target *= 0.6; }
+    if (mus.mode === 't2') { if (key === 'drums' || key === 'lead') target = 0; else target = 1; }
+    mus.lv[key] = lerp(mus.lv[key], target, Math.min(1, dt * (mus.mode === 'build' && key === 'drums' ? 2.5 : 0.8)));
+  }
+  mus.pad.gain.setTargetAtTime(mus.lv.pad * 1.0, n, 0.1);
+  mus.arp.gain.setTargetAtTime(mus.lv.arp * 0.8, n, 0.1);
+  mus.drums.gain.setTargetAtTime(mus.lv.drums * 1.0, n, 0.1);
+  mus.bass.gain.setTargetAtTime(mus.lv.drums * 0.9, n, 0.1);
+  mus.stab.gain.setTargetAtTime(mus.lv.stab * 0.8, n, 0.1);
+  mus.lead.gain.setTargetAtTime(mus.lv.lead * 1.0, n, 0.1);
+  const r = mus.riser;
+  if (mus.mode === 'build') {
+    const p = clamp((m - BUILD_AT) / (DROP_AT - BUILD_AT), 0, 1);
+    r.rg.gain.setTargetAtTime(0.04 + 0.3 * Math.pow(p, 1.5), n, 0.1);
+    r.rbp.frequency.setTargetAtTime(400 + 7000 * p * p, n, 0.1);
+    r.ro.frequency.setTargetAtTime(110 * Math.pow(2, p * 2), n, 0.1);
+    r.rlp.frequency.setTargetAtTime(600 + 3400 * p, n, 0.1);
+    mus.snare.gain.setTargetAtTime(1, n, 0.1);
+    mus.buildP = p;
+  }
+}
+function scheduleMusic() {
+  if (!mus || AC.state !== 'running') return;
+  if (mus.next < AC.currentTime - 0.05) mus.next = AC.currentTime + 0.05;   // tab was asleep: don't burst
+  while (mus.next < AC.currentTime + 0.12) {
+    if (mus.mode === 'build' && mus.dropReady && mus.step % 16 === 0) drop(mus.next);
+    const any = mus.mode !== 't1' || Object.values(mus.lv).some(v => v > 0.004);
+    if (any) playStep(mus.step, mus.next);
+    mus.next += STEP; mus.step = (mus.step + 1) % 128;
+  }
+}
+function drop(time) {
+  mus.mode = 't2'; mus.step = 0;
+  STEP = 60 / 142 / 4;
+  mus.dl.delayTime.setValueAtTime(STEP * 3, time);
+  const r = mus.riser;
+  r.rg.gain.cancelScheduledValues(time); r.rg.gain.setValueAtTime(0, time);
+  mus.snare.gain.cancelScheduledValues(time); mus.snare.gain.setValueAtTime(0, time);
+  [[mus.kick2, 1], [mus.bass2, 0.9], [mus.perc2, 0.8], [mus.lead2, 0.9]].forEach(([g, v]) => { g.gain.cancelScheduledValues(time); g.gain.setValueAtTime(v, time); });
+  impact(time);
+}
+function playStep(s, time) {
+  const L = mus.lv, ch = CHORDS[Math.floor(s / 32) % 4];
+  if (L.pad > 0.004 && s % 32 === 0) padChord(ch.pad, time, STEP * 32);
+  if (L.arp > 0.004) pluck(mf(ch.arp[ARP[s % 16]]), time);
+  if (L.drums > 0.004) {
+    if (s % 4 === 0) { kick(time); duckPad(time, L.drums); }
+    if (s % 4 === 2) hat(time, true); else if (s % 2 === 1) hat(time, false);
+    if (s % 4 !== 0) bass(mf(ch.bass), time, s % 4 === 2 ? 1 : 0.6);
+  }
+  if (L.stab > 0.004 && (s % 32 === 14 || s % 32 === 30)) honkVoice(mf(ch.stab), time, STEP * 1.6, mus.stab, 0.22, 0.72);
+  if (L.lead > 0.004) { const m = MELODY.get(s); if (m) honkVoice(mf(m.m), time, m.l * STEP * 0.95, mus.lead, 0.13, 0.88); }
+  if (mus.mode === 'build') {
+    const p = mus.buildP || 0, every = p < 0.35 ? 4 : p < 0.7 ? 2 : 1;
+    if (s % every === 0) snare(time, 0.25 + 0.6 * p);
+  }
+  if (mus.mode === 't2') {
+    if (s % 4 === 0) { kick2(time); duckPad(time, 1); }
+    else bass2(mf(ch.bass - 12 + (s % 16 === 15 ? 12 : 0)), time);
+    if (s % 4 === 2) hat(time, true, mus.perc2); else if (s % 2 === 1) hat(time, false, mus.perc2);
+    if (s % 8 === 4) clap(time);
+    const m = MELODY2.get(s);
+    if (m) { supersaw(mf(m.m), time, m.l * STEP, mus.lead2, 0.034); supersaw(mf(m.m - 12), time, m.l * STEP, mus.lead2, 0.018); }
+  }
+}
+function kick2(time) {
+  const o = AC.createOscillator(); o.type = 'sine';
+  o.frequency.setValueAtTime(200, time); o.frequency.exponentialRampToValueAtTime(43, time + 0.07);
+  const sh = AC.createWaveShaper(); sh.curve = shaperCurve;
+  const g = AC.createGain(); g.gain.setValueAtTime(1, time); g.gain.setValueAtTime(0.9, time + 0.12); g.gain.exponentialRampToValueAtTime(0.0001, time + 0.34);
+  o.connect(g); g.connect(sh); sh.connect(mus.kick2); o.start(time); o.stop(time + 0.36);
+  const src = AC.createBufferSource(); src.buffer = noiseBuf;
+  const hp = AC.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 3000;
+  const cg = AC.createGain(); cg.gain.setValueAtTime(0.4, time); cg.gain.exponentialRampToValueAtTime(0.0001, time + 0.008);
+  src.connect(hp); hp.connect(cg); cg.connect(mus.kick2); src.start(time, 0, 0.02);
+}
+function bass2(f, time) {
+  const o = AC.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f;
+  const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 8;
+  lp.frequency.setValueAtTime(1700, time); lp.frequency.exponentialRampToValueAtTime(190, time + STEP * 0.7);
+  const g = AC.createGain(); g.gain.setValueAtTime(0.0001, time); g.gain.exponentialRampToValueAtTime(0.3, time + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, time + STEP * 0.85);
+  o.connect(lp); lp.connect(g); g.connect(mus.bass2); o.start(time); o.stop(time + STEP);
+}
+function clap(time) {
+  for (const d of [0, 0.011, 0.022]) {
+    const src = AC.createBufferSource(); src.buffer = noiseBuf;
+    const bp = AC.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1400; bp.Q.value = 1.4;
+    const g = AC.createGain(); const len = d === 0.022 ? 0.14 : 0.01;
+    g.gain.setValueAtTime(0.32, time + d); g.gain.exponentialRampToValueAtTime(0.0001, time + d + len);
+    src.connect(bp); bp.connect(g); g.connect(mus.perc2); src.start(time + d, Math.random() * 0.3, len + 0.02);
+  }
+}
+function snare(time, amp) {
+  const src = AC.createBufferSource(); src.buffer = noiseBuf;
+  const bp = AC.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1900; bp.Q.value = 0.8;
+  const g = AC.createGain(); g.gain.setValueAtTime(0.3 * amp, time); g.gain.exponentialRampToValueAtTime(0.0001, time + 0.11);
+  src.connect(bp); bp.connect(g); g.connect(mus.snare); src.start(time, Math.random() * 0.3, 0.13);
+  const o = AC.createOscillator(); o.type = 'triangle'; o.frequency.setValueAtTime(210, time); o.frequency.exponentialRampToValueAtTime(150, time + 0.06);
+  const og = AC.createGain(); og.gain.setValueAtTime(0.25 * amp, time); og.gain.exponentialRampToValueAtTime(0.0001, time + 0.07);
+  o.connect(og); og.connect(mus.snare); o.start(time); o.stop(time + 0.08);
+}
+function supersaw(f, time, dur, dest, amp) {
+  const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 1.5;
+  lp.frequency.setValueAtTime(6500, time); lp.frequency.exponentialRampToValueAtTime(3200, time + dur);
+  const g = AC.createGain();
+  g.gain.setValueAtTime(0.0001, time); g.gain.exponentialRampToValueAtTime(amp, time + 0.012);
+  g.gain.setValueAtTime(amp * 0.85, time + Math.max(0.02, dur - 0.03)); g.gain.exponentialRampToValueAtTime(0.0001, time + dur + 0.3);
+  lp.connect(g); g.connect(dest);
+  for (const det of [-30, -19, -9, 0, 9, 19, 30]) {
+    const o = AC.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.detune.value = det + (Math.random() - 0.5) * 4;
+    o.connect(lp); o.start(time); o.stop(time + dur + 0.35);
+  }
+}
+function impact(time) {
+  const src = AC.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+  const hp = AC.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 3500;
+  const g = AC.createGain(); g.gain.setValueAtTime(0.35, time); g.gain.exponentialRampToValueAtTime(0.0001, time + 2.2);
+  src.connect(hp); hp.connect(g); g.connect(mus.bus); g.connect(mus.conv); src.start(time); src.stop(time + 2.3);
+  const o = AC.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(75, time); o.frequency.exponentialRampToValueAtTime(30, time + 1.4);
+  const og = AC.createGain(); og.gain.setValueAtTime(0.8, time); og.gain.exponentialRampToValueAtTime(0.0001, time + 1.5);
+  o.connect(og); og.connect(mus.bus); o.start(time); o.stop(time + 1.6);
+}
+function padChord(notes, time, dur) {
+  const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 2;
+  lp.frequency.setValueAtTime(700, time); lp.frequency.linearRampToValueAtTime(2600, time + dur * 0.6); lp.frequency.linearRampToValueAtTime(1500, time + dur);
+  const g = AC.createGain();
+  g.gain.setValueAtTime(0.0001, time); g.gain.linearRampToValueAtTime(0.045, time + 0.5);
+  g.gain.setValueAtTime(0.045, time + dur - 0.05); g.gain.linearRampToValueAtTime(0.0001, time + dur + 0.7);
+  lp.connect(g); g.connect(mus.duck);
+  for (const m of notes) for (const det of [-14, 0, 14]) {
+    const o = AC.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mf(m); o.detune.value = det;
+    o.connect(lp); o.start(time); o.stop(time + dur + 0.75);
+  }
+}
+function pluck(f, time) {
+  const o = AC.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f;
+  const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 4;
+  lp.frequency.setValueAtTime(3800, time); lp.frequency.exponentialRampToValueAtTime(500, time + 0.16);
+  const g = AC.createGain(); g.gain.setValueAtTime(0.0001, time); g.gain.exponentialRampToValueAtTime(0.11, time + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, time + 0.2);
+  o.connect(lp); lp.connect(g); g.connect(mus.arp); o.start(time); o.stop(time + 0.22);
+}
+function kick(time) {
+  const o = AC.createOscillator(); o.type = 'sine';
+  o.frequency.setValueAtTime(165, time); o.frequency.exponentialRampToValueAtTime(46, time + 0.11);
+  const g = AC.createGain(); g.gain.setValueAtTime(0.95, time); g.gain.exponentialRampToValueAtTime(0.0001, time + 0.32);
+  o.connect(g); g.connect(mus.drums); o.start(time); o.stop(time + 0.33);
+}
+function hat(time, open, dest) {
+  const src = AC.createBufferSource(); src.buffer = noiseBuf;
+  const hp = AC.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = open ? 7500 : 9500;
+  const g = AC.createGain(); const d = open ? 0.09 : 0.03;
+  g.gain.setValueAtTime(open ? 0.14 : 0.06, time); g.gain.exponentialRampToValueAtTime(0.0001, time + d);
+  src.connect(hp); hp.connect(g); g.connect(dest || mus.drums); src.start(time, Math.random() * 0.3, d + 0.01);
+}
+function bass(f, time, acc) {
+  const o = AC.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f;
+  const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 3;
+  lp.frequency.setValueAtTime(900 * acc, time); lp.frequency.exponentialRampToValueAtTime(220, time + STEP * 0.9);
+  const g = AC.createGain(); g.gain.setValueAtTime(0.0001, time); g.gain.exponentialRampToValueAtTime(0.22 * acc, time + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, time + STEP * 0.95);
+  o.connect(lp); lp.connect(g); g.connect(mus.bass); o.start(time); o.stop(time + STEP);
+}
+function duckPad(time, depth) {
+  const d = mus.duck.gain;
+  d.cancelScheduledValues(time); d.setValueAtTime(1 - 0.65 * depth, time); d.linearRampToValueAtTime(1, time + STEP * 3.2);
+}
+// A singing honk: nasal saw+square through goose-ish formants, scooping up into the note
+function honkVoice(f, time, dur, dest, amp, scoop) {
+  const out = AC.createGain();
+  out.gain.setValueAtTime(0.0001, time);
+  out.gain.exponentialRampToValueAtTime(amp, time + 0.025);
+  out.gain.setValueAtTime(amp * 0.85, time + Math.max(0.04, dur - 0.05));
+  out.gain.exponentialRampToValueAtTime(0.0001, time + dur + 0.08);
+  const sh = AC.createWaveShaper(); sh.curve = shaperCurve;
+  const f1 = AC.createBiquadFilter(); f1.type = 'bandpass'; f1.frequency.value = 950; f1.Q.value = 2.5;
+  const f2 = AC.createBiquadFilter(); f2.type = 'bandpass'; f2.frequency.value = 1800; f2.Q.value = 3.5;
+  const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2800;
+  const lpg = AC.createGain(); lpg.gain.value = 0.3; const fm = AC.createGain(); fm.gain.value = 1.4;
+  const vib = AC.createOscillator(); vib.frequency.value = 5.5;
+  const vg = AC.createGain(); vg.gain.setValueAtTime(0, time); vg.gain.linearRampToValueAtTime(f * 0.012, time + Math.min(0.3, dur));
+  vib.connect(vg);
+  [['sawtooth', 1], ['square', 1.006]].forEach(([type, det]) => {
+    const o = AC.createOscillator(); o.type = type;
+    o.frequency.setValueAtTime(f * scoop * det, time);
+    o.frequency.exponentialRampToValueAtTime(f * 1.02 * det, time + 0.045);
+    o.frequency.exponentialRampToValueAtTime(f * det, time + 0.09);
+    vg.connect(o.frequency);
+    o.connect(sh); o.start(time); o.stop(time + dur + 0.1);
+  });
+  vib.start(time); vib.stop(time + dur + 0.1);
+  sh.connect(f1); sh.connect(f2); sh.connect(lp);
+  f1.connect(fm); f2.connect(fm); fm.connect(out); lp.connect(lpg); lpg.connect(out);
+  out.connect(dest);
+}
+
+/* ---------- actions ---------- */
+function beakTip() {
+  const a = ang + tilt, f = Math.sign(facing) || 1;
+  const lx = -80 * f, ly = -13;
+  return { x: head.x + lx * Math.cos(a) - ly * Math.sin(a), y: head.y + lx * Math.sin(a) + ly * Math.cos(a) };
+}
+function honk(pitch) {
+  honkT = 0;
+  const p = pitch || rand(0.92, 1.1);
+  sfxHonk(p);
+  const tip = beakTip();
+  texts.push({ x: tip.x, y: tip.y, txt: 'HONK!', t0: t, rot: rand(-0.2, 0.2), dir: Math.sign(facing) || 1 });
+}
+function eat(b) {
+  breads.splice(breads.indexOf(b), 1);
+  eaten++; chompT = 0;
+  sfxGobble();
+  const s = cam.s;
+  for (let i = 0; i < 16; i++) {
+    const a = rand(0, Math.PI * 2), sp = rand(80, 320) / s;
+    particles.push({ x: b.x, y: b.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 120 / s, life: rand(0.5, 0.9), t0: t, sz: rand(4, 9) / s, c: Math.random() < 0.35 ? C.crust : C.crumb });
+  }
+  bulges.push({ s: 30, t0: t });
+  texts.push({ x: b.x, y: b.y - b.r, txt: 'GOBBLE', t0: t, rot: rand(-0.15, 0.15), dir: 1, small: true });
+  updateHud();
+  if (eaten === 1) {
+    startGrow();
+  } else {
+    spawnQueue.push(t + 0.35);
+    if (Math.random() < 0.35) setTimeout(() => honk(1.12), 420);
+  }
+}
+
+/* ---------- input: gyro tilt, or thumb slide where the sensor is blocked ---------- */
+const tiltIco = document.getElementById('tiltIco');
+let started = false, aim = 0, aimT = 0, slide = null;
+const gyro = { asked: false, active: false, tilt: 0, base: null };
+function local(e) { const r = stage.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+function headScreenDist(x, y) { const h = toScreen(head.x, head.y); return Math.hypot(h.x - x, h.y - y); }
+
+function onOrient(e) {
+  if (e.gamma == null || e.beta == null) return;
+  const a = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
+  const raw = a === 90 ? e.beta : (a === -90 || a === 270) ? -e.beta : e.gamma;
+  gyro.tilt = raw;
+  if (!gyro.active) { gyro.active = true; tiltIco.hidden = false; }
+}
+function askGyro() {
+  if (gyro.asked) return;
+  gyro.asked = true;
+  const DOE = window.DeviceOrientationEvent;
+  if (!DOE) return;
+  // events only arrive where the sensor is allowed; until then the thumb slide steers
+  addEventListener('deviceorientation', onOrient);
+  try {
+    // iOS asks for permission, and only from the tap itself
+    if (typeof DOE.requestPermission === 'function') DOE.requestPermission().catch(() => {});
+  } catch (err) { /* blocked here */ }
+}
+
+cv.addEventListener('pointerdown', e => {
+  askGyro();
+  initAudio();
+  try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+  const p = local(e);
+  downInfo = { x: p.x, y: p.y, t: performance.now(), moved: false };
+  slide = { x0: p.x, aim0: aimT };
+  dragging = true;
+  cv.classList.add('held');
+  if (!started && phase === 'first') { started = true; everDragged = true; }
+});
+cv.addEventListener('pointermove', e => {
+  if (!dragging) return;
+  const p = local(e);
+  if (downInfo && Math.hypot(p.x - downInfo.x, p.y - downInfo.y) > 8) downInfo.moved = true;
+  if (!gyro.active && slide) aimT = clamp(slide.aim0 + (p.x - slide.x0) * 0.011, -CONE, CONE);
+});
+function endDrag(e) {
+  if (!dragging) return;
+  dragging = false; lastDragEnd = t; slide = null;
+  cv.classList.remove('held');
+  const p = local(e);
+  if (downInfo && !downInfo.moved && performance.now() - downInfo.t < 350 && headScreenDist(p.x, p.y) < 75 * cam.s + 20) honk();
+  downInfo = null;
+}
+cv.addEventListener('pointerup', endDrag);
+cv.addEventListener('pointercancel', endDrag);
+addEventListener('resize', resize);
+
+const muteBtn = document.getElementById('muteBtn');
+muteBtn.addEventListener('click', () => {
+  initAudio();
+  muted = !muted;
+  if (master) master.gain.setTargetAtTime(muted ? 0 : 0.75, AC.currentTime, 0.02);
+  document.getElementById('icoOn').hidden = muted;
+  document.getElementById('icoOff').hidden = !muted;
+  muteBtn.setAttribute('aria-label', muted ? 'Unmute sound' : 'Mute sound');
+  muteBtn.title = muted ? 'Sound off' : 'Sound on';
+});
+document.getElementById('resetBtn').addEventListener('click', () => { initAudio(); reset(); });
+
+function startGrow() {
+  phase = 'grow';
+  zoomPunch = 1;
+  for (let i = 0; i < breadCap(); i++) spawnQueue.push(t + 0.4 + i * 0.3);
+}
+
+/* ---------- update ---------- */
+function update(dt) {
+  t += dt;
+
+  // intro: bread drifts in after a few seconds
+  if (phase === 'intro' && t > 2.8) { phase = 'first'; makeFirstBread(); }
+
+  // aim: phone tilt if the sensor answers, otherwise the thumb slide (which eases back to straight up)
+  if (gyro.active) {
+    const tl = gyro.tilt, dz = 2.5;
+    const v = Math.abs(tl) < dz ? 0 : (tl - Math.sign(tl) * dz);
+    aimT = clamp(v / 26 * CONE, -CONE, CONE);
+    tiltIco.style.transform = `rotate(${clamp(tl, -45, 45)}deg)`;
+  } else if (!dragging) {
+    aimT = lerp(aimT, 0, Math.min(1, dt * 2.5));
+  }
+  aim = lerp(aim, aimT, Math.min(1, dt * 8));
+
+  // head movement: climbing is automatic once started
+  let desired = { x: 0, y: 0 };
+  const ms = maxSpeed();
+  if (started) {
+    const sp = ms * 0.85 * Math.min(1, (t - (update.t0 ?? (update.t0 = t))) * 1.2 + 0.2);
+    desired = { x: Math.sin(aim) * sp, y: -Math.cos(aim) * sp };
+  } else update.t0 = undefined;
+  const k = Math.min(1, dt * 8);
+  vel.x = lerp(vel.x, desired.x, k); vel.y = lerp(vel.y, desired.y, k);
+  head.x += vel.x * dt; head.y += vel.y * dt;
+  if (vel.y < 0) heightM += -vel.y * dt * mpu();
+  const speed = Math.hypot(vel.x, vel.y);
+  const frac = clamp(speed / Math.max(1, ms), 0, 1);
+  stretchCharge = frac > 0.15 ? Math.min(1, stretchCharge + dt * 0.5) : Math.max(0, stretchCharge - dt * 2.5);
+  // the rubbery stretch backs off as the music takes over
+  const musicIn = mus ? Math.max(mus.lv.pad, mus.lv.arp) : 0;
+  updateStretchSound(frac * (0.3 + 0.7 * Math.min(1, Math.abs(aimT - aim) * 3 + (1 - musicIn))) * (1 - 0.6 * musicIn));
+
+  // grow the neck
+  const last = pts[pts.length - 1];
+  const SP = Math.max(8, 2.5 / cam.s);
+  const dl = dist(last, head);
+  if (dl > SP) { addPt(head.x, head.y); grown += dl; neckM += dl * mpu(); }
+
+  // head angle follows the neck
+  const back = pointBack(60);
+  const bdx = head.x - back.x, bdy = head.y - back.y;
+  if (Math.hypot(bdx, bdy) > 2) { const ta = Math.atan2(bdx, -bdy); ang += angDiff(ang, ta) * Math.min(1, dt * 12); }
+
+  // looking around
+  if (started) {
+    if (aim < -0.12) facingT = 1; else if (aim > 0.12) facingT = -1;
+    tiltT = 0;
+    nextHonk -= dt * 0.4;
+    if (nextHonk <= 0 && honkT < 0) { honk(); nextHonk = rand(4, 9); }
+  } else {
+    lookTimer -= dt;
+    if (lookTimer <= 0) {
+      lookTimer = rand(1.1, 2.6);
+      if (Math.random() < 0.75) facingT = -facingT;
+      tiltT = rand(-0.28, 0.22);
+    }
+    nextHonk -= dt;
+    if (nextHonk <= 0 && honkT < 0) { honk(); nextHonk = rand(3.2, 7.5); if (Math.random() < 0.25) setTimeout(() => honk(1.05), 330); }
+  }
+  facing = lerp(facing, facingT, Math.min(1, dt * 9));
+  tilt = lerp(tilt, tiltT, Math.min(1, dt * 4));
+  if (honkT >= 0) { honkT += dt; if (honkT > honkDur) honkT = -1; }
+  if (chompT >= 0) { chompT += dt; if (chompT > 0.55) chompT = -1; }
+
+  // bread
+  for (const b of breads) {
+    if (b.enter) {
+      const p = clamp((t - b.enter.t0) / b.enter.dur, 0, 1), e = easeOutCubic(p);
+      b.bx = lerp(b.enter.from.x, b.enter.to.x, e);
+      b.by = lerp(b.enter.from.y, b.enter.to.y, e) + Math.sin(p * Math.PI * 2.2) * 40 * (1 - p);
+      b.rot = Math.sin(p * Math.PI * 3) * 0.35 * (1 - p);
+      if (p >= 1) { b.enter = null; b.arrived = t; }
+    }
+    const bob = reduceMotion ? 0 : 1;
+    b.x = b.bx + Math.sin(t * 0.9 + b.ph) * 4 * bob;
+    b.y = b.by + Math.sin(t * 1.6 + b.ph) * 7 * bob;
+    b.rr = (b.enter ? b.rot : Math.sin(t * 1.1 + b.ph) * 0.08) + (b.rot0 || 0);
+  }
+  const tip = beakTip();
+  const hc = { x: head.x + 5 * Math.sin(ang), y: head.y - 5 * Math.cos(ang) };
+  for (const b of breads.slice()) {
+    const hr = b.r * (b.type === 'baguette' ? 1.15 : 1);
+    if (dist(tip, b) < hr * 0.9 + 22 || dist(hc, b) < hr * 0.8 + 48) eat(b);
+  }
+  // climbed past the first slice without eating it: carry on anyway
+  if (phase === 'first' && breads[0] && head.y < breads[0].by - 260) { breads.length = 0; startGrow(); }
+  if (phase === 'grow') {
+    const viewBottom = cam.y + H / 2 / cam.s;
+    for (const b of breads.slice()) if (b.by - b.r > viewBottom && b.by > head.y) breads.splice(breads.indexOf(b), 1);
+  }
+  while (spawnQueue.length && spawnQueue[0] <= t) {
+    spawnQueue.shift();
+    if (breads.length < breadCap()) spawnBread();
+  }
+  if (phase === 'grow' && breads.length + spawnQueue.length < breadCap()) spawnQueue.push(t + 0.25);
+  updateMusic(dt);
+  if (Math.random() < 0.1) updateHud();
+
+  // particles, bulges, texts
+  for (const p of particles) { p.vy += 900 / cam.s * dt * 0.6; p.x += p.vx * dt; p.y += p.vy * dt; }
+  particles = particles.filter(p => t - p.t0 < p.life);
+  const bulgeSpeed = 520 * Math.pow(s0 / cam.s, 0.7) + speed;
+  for (const g of bulges) g.s += bulgeSpeed * dt;
+  bulges = bulges.filter(g => g.s < Math.min(600 + grown + 400, 9000 / cam.s * s0));
+  texts = texts.filter(x => t - x.t0 < 1.0);
+
+  // camera
+  const st = sTarget();
+  if (phase === 'grow') {
+    cam.s = lerp(cam.s, st, Math.min(1, dt * (zoomPunch > 0 ? 1.4 : 1.0)));
+    zoomPunch = Math.max(0, zoomPunch - dt * 0.5);
+    // head sits low on the screen so you can see what's coming
+    const tx = head.x + vel.x * 0.25;
+    const ty = head.y - 0.2 * H / cam.s + vel.y * 0.25;
+    cam.x = lerp(cam.x, tx, Math.min(1, dt * 3));
+    cam.y = lerp(cam.y, ty, Math.min(1, dt * 4));
+  } else {
+    // keep the head comfortably on screen before the first bite
+    const hs = toScreen(head.x, head.y);
+    const mx = W * 0.18, my = H * 0.3;
+    let cx = cam.x, cy = cam.y;
+    if (hs.x < mx) cx -= (mx - hs.x) / cam.s; else if (hs.x > W - mx) cx += (hs.x - (W - mx)) / cam.s;
+    if (hs.y < my) cy -= (my - hs.y) / cam.s; else if (hs.y > H - my * 0.6) cy += (hs.y - (H - my * 0.6)) / cam.s;
+    cam.x = lerp(cam.x, cx, Math.min(1, dt * 5)); cam.y = lerp(cam.y, cy, Math.min(1, dt * 5));
+  }
+
+  // arrow toward the first slice until the player starts
+  const fb = breads[0];
+  const wantHint = phase === 'first' && !started && fb && fb.arrived && t - fb.arrived > 0.6;
+  hintA = clamp(hintA + (wantHint ? dt * 1.6 : -dt * 4), 0, 1);
+}
+
+/* ---------- drawing ---------- */
+function hash(a, b, c) { let h = (a * 374761393 + b * 668265263 + c * 2147483647) | 0; h = (h ^ (h >>> 13)) * 1274126177 | 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+function hexRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+const SKY_RGB = SKY.map(([a, c]) => [a, hexRgb(c)]);
+const CLOUD_RGB = CLOUD.map(([a, c]) => [a, hexRgb(c)]);
+function ramp(stops, alt) {
+  if (alt <= stops[0][0]) return stops[0][1];
+  for (let i = 1; i < stops.length; i++) {
+    if (alt <= stops[i][0]) {
+      const [a0, c0] = stops[i - 1], [a1, c1] = stops[i], k = (alt - a0) / (a1 - a0);
+      return [lerp(c0[0], c1[0], k), lerp(c0[1], c1[1], k), lerp(c0[2], c1[2], k)];
+    }
+  }
+  return stops[stops.length - 1][1];
+}
+const rgb = (c, a = 1) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+const smooth = (a, b, x) => { const k = clamp((x - a) / (b - a), 0, 1); return k * k * (3 - 2 * k); };
+function altAtScreenY(y) { return groundY - (cam.y + (y - H / 2) / cam.s); }
+// Sky stage follows neck length: sunset around 250-330 m, stars arriving with the drop at 500 m.
+const SKY_BY_NECK = [[0, 0], [0.3, 120], [3, 1200], [20, 5000], [120, 11000], [250, 16000], [330, 21000], [400, 27000], [455, 34000], [500, 42000], [800, 60000]];
+function skyStage() {
+  const m = neckM, S = SKY_BY_NECK;
+  if (m >= S[S.length - 1][0]) return S[S.length - 1][1];
+  for (let i = 1; i < S.length; i++) if (m <= S[i][0]) return lerp(S[i - 1][1], S[i][1], (m - S[i - 1][0]) / (S[i][0] - S[i - 1][0]));
+  return 0;
+}
+// sky value at a screen row: the stage, plus a softened slice of the real height difference for a gradient
+function skyAt(y) { return Math.max(0, skyStage() + (altAtScreenY(y) - altAtScreenY(H / 2)) * 0.3); }
+
+function drawSky() {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  for (let i = 0; i <= 6; i++) g.addColorStop(i / 6, rgb(ramp(SKY_RGB, skyAt(H * i / 6))));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // stars once night falls
+  const camAlt = skyStage();
+  const starA = smooth(29000, 42000, camAlt);
+  if (starA > 0.01) {
+    const G = 90, oy = -cam.y * cam.s * 0.04, ox = -cam.x * cam.s * 0.04;
+    ctx.fillStyle = '#FFF6DA';
+    for (let gx = Math.floor(-ox / G) - 1; gx * G + ox < W + G; gx++) for (let gy = Math.floor(-oy / G) - 1; gy * G + oy < H + G; gy++) {
+      const h = hash(gx, gy, 99); if (h < 0.45) continue;
+      const x = gx * G + ox + hash(gy, gx, 3) * G, y = gy * G + oy + hash(gx, gy, 5) * G;
+      const tw = reduceMotion ? 1 : 0.65 + 0.35 * Math.sin(t * (1 + h * 3) + h * 40);
+      ctx.globalAlpha = starA * tw * (0.4 + 0.6 * hash(gx, gy, 8));
+      const r = 0.7 + hash(gx, gy, 11) * 1.4;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    }
+    // the moon, barely moving
+    ctx.globalAlpha = starA;
+    const mx = W * 0.78, my = H * 0.2 + Math.max(0, 52000 - camAlt) * 0.004;
+    ctx.beginPath(); ctx.arc(mx, my, 30, 0, Math.PI * 2); ctx.fillStyle = '#FFF2CF'; ctx.fill();
+    ctx.lineWidth = 2.5; ctx.strokeStyle = C.ink; ctx.stroke();
+    ctx.fillStyle = 'rgba(59,36,22,0.12)';
+    [[-9, -6, 6], [8, 7, 4.5], [5, -12, 3]].forEach(([x, y, r]) => { ctx.beginPath(); ctx.arc(mx + x, my + y, r, 0, Math.PI * 2); ctx.fill(); });
+    ctx.globalAlpha = 1;
+  }
+}
+
+// Cloud layers: p = parallax, sc = scale, presence chance, alpha
+const CLOUD_LAYERS = {
+  back: [{ p: 0.4, sc: 0.5, pr: 0.55, a: 0.75, seed: 1 }, { p: 0.7, sc: 0.75, pr: 0.45, a: 0.9, seed: 2 }],
+  front: [{ p: 1.35, sc: 1.35, pr: 0.22, a: 0.55, seed: 3 }]
+};
+function drawClouds(layers) {
+  const camAlt = skyStage();
+  const col = ramp(CLOUD_RGB, camAlt);
+  for (const L of layers) {
+    const k = cam.s * L.sc;
+    ctx.setTransform(DPR * k, 0, 0, DPR * k, DPR * (W / 2 - cam.x * L.p * k), DPR * (H / 2 - cam.y * L.p * k));
+    const CX = 820, CY = 560;
+    const x0 = cam.x * L.p - W / 2 / k - 500, x1 = cam.x * L.p + W / 2 / k + 500;
+    const y0 = cam.y * L.p - H / 2 / k - 300, y1 = cam.y * L.p + H / 2 / k + 300;
+    const drift = reduceMotion ? 0 : t * 14;
+    ctx.globalAlpha = L.a;
+    for (let gy = Math.floor(y0 / CY); gy <= y1 / CY; gy++) {
+      const cy = gy * CY;
+      // clouds start a little above the park
+      if (groundY - cy / L.p < 2600) continue;
+      for (let gx = Math.floor((x0 - drift) / CX) - 1; gx <= (x1 - drift) / CX + 1; gx++) {
+        if (hash(gx, gy, L.seed) > L.pr) continue;
+        const x = gx * CX + hash(gy, gx, L.seed + 9) * CX * 0.7 + drift;
+        const y = cy + hash(gx, gy, L.seed + 4) * CY * 0.6;
+        drawCloud(x, y, 220 + hash(gx, gy, L.seed + 6) * 260, Math.floor(3 + hash(gy, gx, L.seed + 2) * 3), gx * 31 + gy, col);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+function drawCloud(x, y, w, n, seed, col) {
+  ctx.fillStyle = 'rgba(59,36,22,0.10)';
+  ctx.beginPath(); ctx.ellipse(x, y + 6, w * 0.5, w * 0.07, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = rgb(col);
+  ctx.beginPath();
+  ctx.roundRect(x - w / 2, y - w * 0.16, w, w * 0.16, w * 0.08);
+  for (let i = 0; i < n; i++) {
+    const cx = x - w / 2 + w * (i + 0.5) / n;
+    const mid = 1 - Math.abs((i + 0.5) / n - 0.5) * 1.3;
+    const r = (w / n) * (0.55 + 0.45 * mid + hash(seed, i, 7) * 0.25);
+    ctx.moveTo(cx + r, y - r * 0.75); ctx.arc(cx, y - r * 0.75, r, 0, Math.PI * 2);
+  }
+  ctx.fill();
+}
+
+/* ---------- the park ---------- */
+function drawPark() {
+  const viewBottom = cam.y + H / 2 / cam.s;
+  if (viewBottom < groundY - 700) return false;
+  const ol = OLw();
+  const x0 = cam.x - W / 2 / cam.s - 300, x1 = cam.x + W / 2 / cam.s + 300;
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  // distant hills
+  ctx.beginPath(); ctx.moveTo(x0, groundY + 10);
+  for (let x = x0; x <= x1 + 40; x += 40) ctx.lineTo(x, groundY - 70 - 38 * Math.sin(x * 0.0037) - 22 * Math.sin(x * 0.011 + 1.3));
+  ctx.lineTo(x1 + 40, groundY + 10); ctx.closePath();
+  ctx.fillStyle = C.hill; ctx.fill();
+  // far tree line
+  for (let i = Math.floor(x0 / 120); i <= x1 / 120; i++) {
+    if (hash(i, 7, 21) < 0.35) continue;
+    const x = i * 120 + hash(i, 3, 21) * 60, r = 34 + hash(i, 5, 21) * 30;
+    ctx.fillStyle = C.wood; ctx.fillRect(x - 5, groundY - r * 0.8, 10, r * 0.8 + 4);
+    ctx.fillStyle = C.treeFar; ctx.beginPath(); ctx.arc(x, groundY - r * 1.25, r, 0, Math.PI * 2); ctx.fill();
+  }
+  // lawn
+  ctx.fillStyle = C.grass; ctx.fillRect(x0, groundY, x1 - x0, 200000);
+  ctx.beginPath(); ctx.moveTo(x0, groundY); ctx.lineTo(x1, groundY); ctx.strokeStyle = C.ink; ctx.lineWidth = ol * 0.6; ctx.stroke();
+  // winding path
+  const P = k => { // bezier centre from horizon to foreground
+    const a = [140, groundY], b = [420, groundY + 140], c = [-520, groundY + 260], d = [-260, bottomY + 300];
+    const u = 1 - k;
+    return [u*u*u*a[0] + 3*u*u*k*b[0] + 3*u*k*k*c[0] + k*k*k*d[0], u*u*u*a[1] + 3*u*u*k*b[1] + 3*u*k*k*c[1] + k*k*k*d[1]];
+  };
+  const left = [], right = [];
+  for (let i = 0; i <= 24; i++) { const k = i / 24, p = P(k), w = 14 + 190 * k * k; left.push([p[0] - w, p[1]]); right.push([p[0] + w, p[1]]); }
+  ctx.beginPath(); left.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+  right.reverse().forEach(p => ctx.lineTo(p[0], p[1])); ctx.closePath();
+  ctx.fillStyle = C.path; ctx.fill(); ctx.strokeStyle = C.ink; ctx.lineWidth = ol * 0.6; ctx.stroke();
+  // pond
+  ctx.beginPath(); ctx.ellipse(-190, groundY + 105, 120, 26, 0, 0, Math.PI * 2);
+  ctx.fillStyle = C.pond; ctx.fill(); ctx.strokeStyle = C.ink; ctx.lineWidth = ol; ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = ol * 0.8;
+  [[-250, groundY + 99, 40], [-170, groundY + 113, 55]].forEach(([x, y, w]) => { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + w, y); ctx.stroke(); });
+  // lamp post
+  const lx = -150, ly = groundY + 150;
+  ctx.fillStyle = C.ink; ctx.fillRect(lx - 4, ly - 190, 8, 190); ctx.fillRect(lx - 13, ly - 7, 26, 8);
+  ctx.beginPath(); ctx.roundRect(lx - 15, ly - 226, 30, 38, 7); ctx.fillStyle = C.lampGlow; ctx.fill(); ctx.strokeStyle = C.ink; ctx.lineWidth = ol * 0.8; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(lx - 21, ly - 226); ctx.lineTo(lx, ly - 244); ctx.lineTo(lx + 21, ly - 226); ctx.closePath(); ctx.fillStyle = C.ink; ctx.fill();
+  // bench
+  const bx = 175, by = groundY + 92;
+  ctx.fillStyle = C.wood; ctx.strokeStyle = C.ink; ctx.lineWidth = ol * 0.8;
+  [[bx - 62, by - 34, 10, 34], [bx + 52, by - 34, 10, 34], [bx - 75, by - 42, 150, 12], [bx - 75, by - 82, 150, 12], [bx - 75, by - 63, 150, 12]].forEach(([x, y, w, h]) => {
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, 3); ctx.fill(); ctx.stroke();
+  });
+  // trees in the park
+  [[330, groundY + 150, 0.8], [-330, groundY + 70, 0.65], [700, groundY + 40, 0.6], [-720, groundY + 50, 0.55]].forEach(([x, y, sc]) => {
+    ctx.beginPath(); ctx.roundRect(x - 20 * sc, y - 220 * sc, 40 * sc, 220 * sc, 6); ctx.fillStyle = C.wood; ctx.fill(); ctx.strokeStyle = C.ink; ctx.lineWidth = ol; ctx.stroke();
+    ctx.beginPath();
+    [[0, -300, 110], [-85, -250, 80], [85, -250, 80], [-45, -370, 75], [55, -365, 70]].forEach(([dx, dy, r]) => { ctx.moveTo(x + dx * sc + r * sc, y + dy * sc); ctx.arc(x + dx * sc, y + dy * sc, r * sc, 0, Math.PI * 2); });
+    ctx.fillStyle = C.leaf; ctx.fill();
+    ctx.strokeStyle = C.ink; ctx.lineWidth = ol; ctx.stroke();
+    ctx.fill();
+  });
+  return true;
+}
+// grass in front of the neck so the goose stands in the lawn
+function drawForegroundGrass() {
+  const viewBottom = cam.y + H / 2 / cam.s;
+  if (viewBottom < bottomY - 120) return;
+  const ol = OLw();
+  const x0 = cam.x - W / 2 / cam.s - 100, x1 = cam.x + W / 2 / cam.s + 100;
+  const top = bottomY - 60;
+  ctx.beginPath(); ctx.moveTo(x0, top + 200000);
+  for (let x = Math.floor(x0 / 28) * 28; x <= x1 + 28; x += 28) {
+    const h = 26 + hash(Math.round(x / 28), 1, 77) * 40;
+    const sway = reduceMotion ? 0 : Math.sin(t * 1.6 + x * 0.01) * 5;
+    ctx.lineTo(x, top + 20); ctx.lineTo(x + 10 + sway, top + 20 - h); ctx.lineTo(x + 20, top + 20);
+  }
+  ctx.lineTo(x1 + 28, top + 200000); ctx.closePath();
+  ctx.fillStyle = C.grassDark; ctx.fill(); ctx.strokeStyle = C.ink; ctx.lineWidth = ol * 0.7; ctx.stroke();
+}
+function worldXf() { ctx.setTransform(DPR * cam.s, 0, 0, DPR * cam.s, DPR * (W / 2 - cam.x * cam.s), DPR * (H / 2 - cam.y * cam.s)); }
+function OLw() { return Math.max(5, 2.4 / cam.s); }
+
+function drawNeck() {
+  const ol = OLw();
+  const end = { x: head.x - Math.sin(ang) * 22, y: head.y + Math.cos(ang) * 22 };
+  const vx0 = cam.x - W / 2 / cam.s - 200, vx1 = cam.x + W / 2 / cam.s + 200;
+  const vy0 = cam.y - H / 2 / cam.s - 200, vy1 = cam.y + H / 2 / cam.s + 200;
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  const n = chunks.length;
+  for (let k = 0; k < n; k++) {
+    const c = chunks[k], lastC = k === n - 1;
+    if (!lastC && (c.maxx < vx0 || c.minx > vx1 || c.maxy < vy0 || c.miny > vy1)) continue;
+    const bEnd = lastC ? pts.length - 1 : chunks[k + 1].a;
+    ctx.beginPath(); ctx.moveTo(pts[c.a].x, pts[c.a].y);
+    for (let i = c.a + 1; i <= bEnd; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    if (lastC) ctx.lineTo(end.x, end.y);
+    ctx.strokeStyle = C.ink; ctx.lineWidth = NECK + ol * 2; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(pts[c.fa].x, pts[c.fa].y);
+    for (let i = c.fa + 1; i <= bEnd; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    if (lastC) ctx.lineTo(end.x, end.y);
+    ctx.strokeStyle = C.cream; ctx.lineWidth = NECK; ctx.stroke();
+  }
+  // gulp bulges travelling down the neck
+  for (const g of bulges) {
+    const life = g.s;
+    const R = HALF + 17 * Math.min(1, life / 120);
+    const c = pointBack(g.s);
+    ctx.fillStyle = C.ink; ctx.beginPath(); ctx.arc(c.x, c.y, R + ol, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    for (let s = g.s - R * 1.5, first = true; s <= g.s + R * 1.5; s += 12, first = false) {
+      const p = pointBack(Math.max(0, s)); first ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+    }
+    ctx.strokeStyle = C.cream; ctx.lineWidth = NECK; ctx.stroke();
+    ctx.fillStyle = C.cream; ctx.beginPath(); ctx.arc(c.x, c.y, R, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function mouthOpen() {
+  let o = 0;
+  if (honkT >= 0) { const p = honkT / honkDur; o = Math.max(o, Math.sin(Math.min(1, p * 1.25) * Math.PI)); }
+  if (chompT >= 0) o = Math.max(o, Math.abs(Math.sin(chompT * 26)) * 0.9 * (1 - chompT / 0.55));
+  return o;
+}
+function rot(p, c, a) { const x = p[0] - c[0], y = p[1] - c[1]; return [c[0] + x * Math.cos(a) - y * Math.sin(a), c[1] + x * Math.sin(a) + y * Math.cos(a)]; }
+
+function drawHead() {
+  const ol = OLw();
+  ctx.save();
+  ctx.translate(head.x, head.y);
+  ctx.rotate(ang + tilt);
+  // skull
+  const hw = HALF + ol / 2;
+  const skull = () => { ctx.beginPath(); ctx.moveTo(-hw, 32); ctx.lineTo(-hw, -4); ctx.ellipse(0, -4, hw, 52 + ol / 2, 0, Math.PI, Math.PI * 2); ctx.lineTo(hw, 32); };
+  skull(); ctx.closePath(); ctx.fillStyle = C.cream; ctx.fill();
+  // throat patch
+  ctx.save();
+  ctx.scale(facing, 1);
+  ctx.beginPath(); ctx.rect(-50 + ol / 2, -60, 100 - ol, 140); ctx.clip();
+  ctx.beginPath(); ctx.ellipse(-12, 36, 33, 40, 0.12, 0, Math.PI * 2); ctx.fillStyle = C.patch; ctx.fill();
+  ctx.restore();
+  skull(); ctx.strokeStyle = C.ink; ctx.lineWidth = ol; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke();
+
+  // face (flips to look back and forth)
+  ctx.save();
+  ctx.scale(facing, 1);
+  ctx.beginPath(); ctx.ellipse(14, -29, 3.8, 4.8, 0, 0, Math.PI * 2); ctx.fillStyle = C.ink; ctx.fill();
+  const o = mouthOpen();
+  const hinge = [5, 4];
+  const aU = 0.13 * o, aL = -0.5 * o;
+  const U = p => rot(p, hinge, aU), Lr = p => rot(p, hinge, aL);
+  // mouth interior
+  if (o > 0.02) {
+    ctx.beginPath();
+    let p = U([-74, -9]); ctx.moveTo(hinge[0], hinge[1]); ctx.lineTo(p[0], p[1]);
+    p = Lr([-74, -9]); ctx.lineTo(p[0], p[1]); ctx.closePath();
+    ctx.fillStyle = C.mouth; ctx.fill();
+  }
+  // lower mandible
+  const lower = () => {
+    let p;
+    ctx.beginPath(); p = Lr([-76, -9]); ctx.moveTo(p[0], p[1]);
+    const q1 = Lr([-35, -5]), e1 = Lr([6, 4]); ctx.quadraticCurveTo(q1[0], q1[1], e1[0], e1[1]);
+    const c1 = Lr([4, 14]), c2 = Lr([-18, 24]), e2 = Lr([-34, 22]); ctx.bezierCurveTo(c1[0], c1[1], c2[0], c2[1], e2[0], e2[1]);
+    const c3 = Lr([-55, 19]), c4 = Lr([-72, 6]), e3 = Lr([-76, -9]); ctx.bezierCurveTo(c3[0], c3[1], c4[0], c4[1], e3[0], e3[1]);
+  };
+  lower(); ctx.fillStyle = C.beakDark; ctx.fill();
+  ctx.strokeStyle = C.ink; ctx.lineWidth = ol * 0.85; ctx.stroke();
+  // upper bill
+  const upper = () => {
+    let p;
+    ctx.beginPath(); p = U([6, 4]); ctx.moveTo(p[0], p[1]);
+    let a = U([5, -12]), b = U([-4, -30]), e = U([-20, -34]); ctx.bezierCurveTo(a[0], a[1], b[0], b[1], e[0], e[1]);
+    a = U([-32, -36]); b = U([-44, -31]); e = U([-56, -28]); ctx.bezierCurveTo(a[0], a[1], b[0], b[1], e[0], e[1]);
+    a = U([-70, -25]); b = U([-82, -20]); e = U([-80, -12]); ctx.bezierCurveTo(a[0], a[1], b[0], b[1], e[0], e[1]);
+    a = U([-79, -9]); e = U([-76, -9]); ctx.quadraticCurveTo(a[0], a[1], e[0], e[1]);
+    a = U([-35, -5]); e = U([6, 4]); ctx.quadraticCurveTo(a[0], a[1], e[0], e[1]);
+    ctx.closePath();
+  };
+  upper(); ctx.fillStyle = C.beak; ctx.fill();
+  // outline only the outer edge and mouth line, like the poster
+  ctx.beginPath();
+  let p = U([-44, -31]); ctx.moveTo(p[0], p[1]);
+  let a = U([-50, -29.5]), e = U([-56, -28]); ctx.quadraticCurveTo(a[0], a[1], e[0], e[1]);
+  a = U([-70, -25]); let b = U([-82, -20]); e = U([-80, -12]); ctx.bezierCurveTo(a[0], a[1], b[0], b[1], e[0], e[1]);
+  a = U([-79, -9]); e = U([-76, -9]); ctx.quadraticCurveTo(a[0], a[1], e[0], e[1]);
+  a = U([-35, -5]); e = U([4, 3]); ctx.quadraticCurveTo(a[0], a[1], e[0], e[1]);
+  ctx.strokeStyle = C.ink; ctx.lineWidth = ol * 0.85; ctx.stroke();
+  // nostril
+  p = U([-22, -21]);
+  ctx.beginPath(); ctx.ellipse(p[0], p[1], 3.6, 2.2, -0.25, 0, Math.PI * 2); ctx.fillStyle = C.ink; ctx.fill();
+  ctx.restore();
+  ctx.restore();
+}
+
+function breadPath(r) {
+  ctx.beginPath();
+  ctx.moveTo(-0.78 * r, 0.88 * r);
+  ctx.lineTo(-0.78 * r, -0.05 * r);
+  ctx.bezierCurveTo(-1.08 * r, -0.16 * r, -1.02 * r, -0.86 * r, -0.45 * r, -0.88 * r);
+  ctx.bezierCurveTo(-0.2 * r, -1.02 * r, 0.2 * r, -1.02 * r, 0.45 * r, -0.88 * r);
+  ctx.bezierCurveTo(1.02 * r, -0.86 * r, 1.08 * r, -0.16 * r, 0.78 * r, -0.05 * r);
+  ctx.lineTo(0.78 * r, 0.88 * r);
+  ctx.quadraticCurveTo(0.78 * r, 1.0 * r, 0.66 * r, 1.0 * r);
+  ctx.lineTo(-0.66 * r, 1.0 * r);
+  ctx.quadraticCurveTo(-0.78 * r, 1.0 * r, -0.78 * r, 0.88 * r);
+  ctx.closePath();
+}
+function drawBreadShape(r, ol) {
+  breadPath(r); ctx.fillStyle = C.crust; ctx.fill();
+  ctx.lineJoin = 'round'; ctx.strokeStyle = C.ink; ctx.lineWidth = ol; ctx.stroke();
+  ctx.save(); ctx.translate(0, 0.06 * r); ctx.scale(0.76, 0.76); breadPath(r); ctx.fillStyle = C.crumb; ctx.fill(); ctx.restore();
+  ctx.fillStyle = C.hole;
+  [[-0.3, -0.25, 0.07], [0.22, -0.4, 0.05], [0.12, 0.1, 0.08], [-0.2, 0.45, 0.06], [0.35, 0.5, 0.05], [-0.42, 0.12, 0.04]].forEach(([x, y, s]) => {
+    ctx.beginPath(); ctx.ellipse(x * r, y * r, s * r * 1.3, s * r, 0.3, 0, Math.PI * 2); ctx.fill();
+  });
+}
+const BREAD_TYPES = [['toast', 0.28], ['roll', 0.2], ['baguette', 0.17], ['croissant', 0.18], ['pretzel', 0.17]];
+function pickType() { let x = Math.random(); for (const [n, w] of BREAD_TYPES) { if ((x -= w) <= 0) return n; } return 'toast'; }
+function drawBreadOf(type, r, ol) {
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  if (type === 'roll') drawRoll(r, ol);
+  else if (type === 'baguette') drawBaguette(r, ol);
+  else if (type === 'croissant') drawCroissant(r, ol);
+  else if (type === 'pretzel') drawPretzel(r, ol);
+  else drawBreadShape(r, ol);
+}
+function drawRoll(r, ol) {
+  ctx.beginPath(); ctx.ellipse(0, 0.12 * r, 0.95 * r, 0.7 * r, 0, 0, Math.PI * 2);
+  ctx.fillStyle = '#C9802F'; ctx.fill(); ctx.strokeStyle = C.ink; ctx.lineWidth = ol; ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(-0.2 * r, -0.18 * r, 0.5 * r, 0.26 * r, -0.2, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,226,160,0.45)'; ctx.fill();
+  for (let i = -1; i <= 1; i++) {
+    ctx.beginPath(); ctx.moveTo(i * 0.38 * r - 0.1 * r, -0.4 * r); ctx.quadraticCurveTo(i * 0.38 * r + 0.08 * r, -0.08 * r, i * 0.38 * r + 0.02 * r, 0.3 * r);
+    ctx.strokeStyle = C.ink; ctx.lineWidth = ol * 1.9; ctx.stroke();
+    ctx.strokeStyle = C.crumb; ctx.lineWidth = ol * 0.9; ctx.stroke();
+  }
+}
+function drawBaguette(r, ol) {
+  ctx.save(); ctx.rotate(-0.5);
+  ctx.beginPath(); ctx.roundRect(-1.25 * r, -0.32 * r, 2.5 * r, 0.64 * r, 0.32 * r);
+  ctx.fillStyle = '#D08A35'; ctx.fill(); ctx.strokeStyle = C.ink; ctx.lineWidth = ol; ctx.stroke();
+  for (const x of [-0.78, -0.26, 0.26, 0.78]) {
+    ctx.beginPath(); ctx.ellipse(x * r, -0.02 * r, 0.24 * r, 0.085 * r, -0.55, 0, Math.PI * 2);
+    ctx.fillStyle = '#F4D28C'; ctx.fill(); ctx.lineWidth = ol * 0.55; ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawCroissant(r, ol) {
+  const sizes = [0.24, 0.34, 0.44, 0.34, 0.24];
+  for (const i of [0, 4, 1, 3, 2]) {
+    const a = lerp(Math.PI + 0.35, Math.PI * 2 - 0.35, i / 4);
+    const x = Math.cos(a) * 0.72 * r, y = 0.45 * r + Math.sin(a) * 0.72 * r, s = sizes[i] * r;
+    ctx.beginPath(); ctx.ellipse(x, y, s * 1.05, s * 0.95, a + Math.PI / 2, 0, Math.PI * 2);
+    ctx.fillStyle = i === 2 ? '#E2A247' : '#D58E37'; ctx.fill();
+    ctx.strokeStyle = C.ink; ctx.lineWidth = ol; ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(x - s * 0.2, y - s * 0.3, s * 0.45, s * 0.18, a + Math.PI / 2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,230,170,0.5)'; ctx.fill();
+  }
+}
+function drawPretzel(r, ol) {
+  const path = () => {
+    ctx.beginPath(); ctx.moveTo(-0.22 * r, 0.74 * r);
+    ctx.bezierCurveTo(-1.28 * r, 0.56 * r, -0.98 * r, -0.88 * r, -0.15 * r, -0.62 * r);
+    ctx.bezierCurveTo(0.36 * r, -0.44 * r, 0.26 * r, 0.14 * r, 0, 0.32 * r);
+    ctx.bezierCurveTo(-0.26 * r, 0.14 * r, -0.36 * r, -0.44 * r, 0.15 * r, -0.62 * r);
+    ctx.bezierCurveTo(0.98 * r, -0.88 * r, 1.28 * r, 0.56 * r, 0.22 * r, 0.74 * r);
+  };
+  path(); ctx.strokeStyle = C.ink; ctx.lineWidth = 0.3 * r + ol * 2; ctx.stroke();
+  path(); ctx.strokeStyle = '#A65E2B'; ctx.lineWidth = 0.3 * r; ctx.stroke();
+  ctx.fillStyle = '#FFF8EC';
+  [[-0.72, -0.2], [-0.5, -0.58], [0.6, -0.5], [0.8, 0.05], [-0.62, 0.42], [0.55, 0.55], [0.08, -0.18]].forEach(([x, y]) => {
+    ctx.fillRect(x * r - 0.03 * r, y * r - 0.03 * r, 0.06 * r, 0.06 * r);
+  });
+}
+function drawBread() {
+  const ol = OLw();
+  for (const b of breads) {
+    ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.rr || 0);
+    drawBreadOf(b.type, b.r, ol);
+    ctx.restore();
+  }
+  for (const p of particles) {
+    const a = 1 - (t - p.t0) / p.life;
+    ctx.globalAlpha = clamp(a * 1.5, 0, 1);
+    ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(p.x, p.y, p.sz, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = C.ink; ctx.lineWidth = p.sz * 0.35; ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawScreenUI() {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  // floating words
+  for (const x of texts) {
+    const p = (t - x.t0) / 1.0;
+    const s = toScreen(x.x, x.y);
+    const size = (x.small ? 18 : 26) * (p < 0.15 ? easeOutBack(p / 0.15) : 1);
+    if (size <= 0) continue;
+    ctx.save();
+    ctx.translate(s.x - x.dir * 18 * (x.small ? 0 : 1), s.y - 18 - p * 40);
+    ctx.rotate(x.rot);
+    ctx.globalAlpha = p > 0.7 ? (1 - p) / 0.3 : 1;
+    ctx.font = `700 ${size}px ${getComputedStyle(document.documentElement).getPropertyValue('--font-display')}`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round'; ctx.lineWidth = 5; ctx.strokeStyle = C.ink; ctx.strokeText(x.txt, 0, 0);
+    ctx.fillStyle = C.cream; ctx.fillText(x.txt, 0, 0);
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+
+  // off-screen bread markers
+  const hs = toScreen(head.x, head.y);
+  const off = breads.map(b => ({ b, s: toScreen(b.x, b.y) }))
+    .filter(o => o.s.x < -o.b.r * cam.s || o.s.x > W + o.b.r * cam.s || o.s.y < -o.b.r * cam.s || o.s.y > H + o.b.r * cam.s)
+    .sort((a, b) => Math.hypot(a.s.x - hs.x, a.s.y - hs.y) - Math.hypot(b.s.x - hs.x, b.s.y - hs.y))
+    .slice(0, 4);
+  const padT = 128, pad = 30;
+  for (const o of off) {
+    const dx = o.s.x - W / 2, dy = o.s.y - H / 2;
+    const sx = (W / 2 - pad) / Math.abs(dx || 1e-6), sy = dy < 0 ? (H / 2 - padT) / Math.abs(dy || 1e-6) : (H / 2 - pad) / Math.abs(dy || 1e-6);
+    const k = Math.min(sx, sy);
+    const x = W / 2 + dx * k, y = H / 2 + dy * k;
+    const a = Math.atan2(dy, dx);
+    ctx.save(); ctx.translate(x, y);
+    ctx.save(); ctx.rotate(a);
+    ctx.beginPath(); ctx.moveTo(27, 0); ctx.lineTo(16, -9); ctx.lineTo(16, 9); ctx.closePath();
+    ctx.fillStyle = C.ink; ctx.fill();
+    ctx.restore();
+    ctx.beginPath(); ctx.arc(0, 0, 19, 0, Math.PI * 2); ctx.fillStyle = C.cream; ctx.fill();
+    ctx.lineWidth = 2.5; ctx.strokeStyle = C.ink; ctx.stroke();
+    drawBreadOf(o.b.type, 10, 1.8);
+    ctx.restore();
+  }
+
+  // hint arrow toward the bread
+  if (hintA > 0.01 && breads.length) {
+    let nb = null, nd = Infinity;
+    for (const b of breads) { const d = dist(b, head); if (d < nd) { nd = d; nb = b; } }
+    const ux = (nb.x - head.x) / nd, uy = (nb.y - head.y) / nd;
+    const a0 = toScreen(head.x + ux * 85, head.y + uy * 85);
+    const a1 = toScreen(nb.x - ux * (nb.r + 26), nb.y - uy * (nb.r + 26));
+    let L = Math.hypot(a1.x - a0.x, a1.y - a0.y);
+    if (L > 40) {
+      const maxL = Math.min(L, Math.min(W, H) * 0.42);
+      const e = { x: a0.x + (a1.x - a0.x) * maxL / L, y: a0.y + (a1.y - a0.y) * maxL / L };
+      L = maxL;
+      const nx = -(e.y - a0.y) / L, ny = (e.x - a0.x) / L;
+      const bow = Math.min(46, L * 0.28);
+      const cpt = { x: (a0.x + e.x) / 2 + nx * bow, y: (a0.y + e.y) / 2 + ny * bow };
+      const pulse = reduceMotion ? 0 : Math.sin(t * 4) * 0.5 + 0.5;
+      ctx.save();
+      ctx.globalAlpha = hintA * (0.75 + 0.25 * pulse);
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      const path = () => { ctx.beginPath(); ctx.moveTo(a0.x, a0.y); ctx.quadraticCurveTo(cpt.x, cpt.y, e.x, e.y); };
+      ctx.setLineDash([2, 16]); ctx.lineDashOffset = reduceMotion ? 0 : -t * 30;
+      path(); ctx.strokeStyle = C.ink; ctx.lineWidth = 11; ctx.stroke();
+      path(); ctx.strokeStyle = C.cream; ctx.lineWidth = 6; ctx.stroke();
+      ctx.setLineDash([]);
+      const ha = Math.atan2(e.y - cpt.y, e.x - cpt.x);
+      ctx.translate(e.x + Math.cos(ha) * pulse * 5, e.y + Math.sin(ha) * pulse * 5); ctx.rotate(ha);
+      ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(-8, -13); ctx.lineTo(-3, 0); ctx.lineTo(-8, 13); ctx.closePath();
+      ctx.fillStyle = C.cream; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = C.ink; ctx.stroke();
+      ctx.restore();
+    }
+  }
+}
+
+function render() {
+  drawSky();
+  drawClouds(CLOUD_LAYERS.back);
+  worldXf();
+  drawPark();
+  drawBread();
+  drawNeck();
+  drawHead();
+  drawForegroundGrass();
+  drawClouds(CLOUD_LAYERS.front);
+  drawScreenUI();
+}
+
+let lastT = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - lastT) / 1000);
+  lastT = now;
+  update(dt);
+  render();
+  requestAnimationFrame(frame);
+}
+
+if (/[?&]debug\b/.test(location.search)) window.__goose = () => ({ t, eaten, neckM, heightM, started, head: { ...head }, cam: { ...cam }, breads: breads.map(b => ({ x: b.x, y: b.y })), mode: mus && mus.mode, lv: mus && { ...mus.lv } });
+resize();
+reset();
+requestAnimationFrame(frame);
+})();
+</script>
+</body></html>
