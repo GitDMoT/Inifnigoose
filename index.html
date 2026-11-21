@@ -52,6 +52,7 @@ canvas#c.held { cursor: grabbing; }
 .ctrl svg[hidden] { display: none; }
 .tilt { width: 40px; height: 40px; display: grid; place-items: center; color: var(--ink); transition: transform .1s linear; }
 .tilt[hidden] { display: none; }
+.ctrl button[hidden] { display: none; }
 .hud[hidden] { display: none; }
 canvas#c.battle { cursor: none; }
 .card {
@@ -138,8 +139,9 @@ let cam, phase, t, eaten, breads, particles, bulges, texts;
 let honkT, honkDur, chompT, nextHonk, dragging, pointer, downInfo, lastDragEnd, everDragged;
 let stretchCharge, spawnQueue, toastTimer, hintA, zoomPunch, groundY, bottomY, neckM, heightM;
 // Counter growth in metres per second at full climbing speed: starts slow and every bread speeds it up.
-// A steady player (about a piece every second) reaches 500 m at roughly 45 s.
-function growthRate(n) { return 0.1 + 0.19 * n + 0.0105 * n * n; }
+// A steady player (about a piece every second) reaches 500 m at roughly 45 s, then the
+// exponential term takes over and space (50 km) arrives at about 1:30.
+function growthRate(n) { return 0.1 + 0.19 * n + 0.0105 * n * n + 0.03 * Math.exp(n / 11); }
 function mpu() { return growthRate(eaten) / (0.85 * maxSpeed()); }
 
 /* ---------- geometry helpers ---------- */
@@ -707,8 +709,7 @@ cv.addEventListener('pointerdown', e => {
   if (space.on) {
     if (space.stage === 'battle') {
       try { cv.setPointerCapture(e.pointerId); } catch (err) {}
-      space.reticle = local(e); space.firing = true;
-      if (space.fireCd <= 0) { fire(); space.fireCd = 0.13; }
+      pressFire(local(e));
     }
     return;
   }
@@ -729,7 +730,7 @@ cv.addEventListener('pointermove', e => {
   if (!gyro.active && slide) aimT = clamp(slide.aim0 + (p.x - slide.x0) * 0.011, -CONE, CONE);
 });
 function endDrag(e) {
-  if (space.on) { space.firing = false; return; }
+  if (space.on) { releaseFire(); return; }
   if (!dragging) return;
   dragging = false; lastDragEnd = t; slide = null;
   cv.classList.remove('held');
@@ -801,7 +802,7 @@ function update(dt) {
 
   // grow the neck
   const last = pts[pts.length - 1];
-  const SP = Math.max(8, 2.5 / cam.s);
+  const SP = space.on ? Math.max(12, 14 / cam.s) : Math.max(8, 2.5 / cam.s);
   const dl = dist(last, head);
   if (dl > SP) { addPt(head.x, head.y); grown += dl; neckM += dl * mpu(); }
 
@@ -909,13 +910,6 @@ function update(dt) {
 
 /* ---------- space: launch, the aliens' collar, and the turret fight ---------- */
 const SPACE_AT = 50000;                       // metres of neck
-const WAVES = [
-  { grunt: 8 },
-  { grunt: 12, zipper: 4 },
-  { grunt: 10, zipper: 6, brute: 3 },
-  { grunt: 14, zipper: 8, brute: 5 },
-  { boss: 1 }
-];
 const MONSTERS = {
   grunt:  { r: 18, hp: 1, sp: 85,  dmg: 1, col: '#7BC86C' },
   zipper: { r: 14, hp: 1, sp: 160, dmg: 1, col: '#B57BE0' },
@@ -924,80 +918,78 @@ const MONSTERS = {
 const COLLAR_BACK = 150;                     // collar sits this far down the neck from the head
 const cardEl = document.getElementById('card');
 const hudEl = document.querySelector('.hud');
+const resetBtnEl = document.getElementById('resetBtn');
 const space = {};
 function resetSpace() {
   Object.assign(space, {
     on: false, stage: '', t0: 0, launchY: null, warp: 0, earthT: 0,
     saucer: null, bubble: null, collarP: 0, turretA: -Math.PI / 2, barrel: 0, recoil: 0,
-    shield: 12, maxShield: 12, wave: -1, queue: [], monsters: [], shots: [], globs: [], boss: null,
-    kills: 0, shake: 0, reticle: null, firing: false, fireCd: 0, banner: null, nextWaveAt: 0, endAt: 0, cardShown: false
+    shield: 12, maxShield: 12, monsters: [], shots: [], globs: [], boss: null, bossSpawned: false, battleT0: 0, spawnAcc: 0,
+    kills: 0, shake: 0, reticle: null, holding: false, holdT0: 0, fireCd: 0, beam: null, endAt: 0, cardShown: false, lasted: 0, camF: { x: 0.5, y: 0.5 }
   });
   if (cardEl) cardEl.hidden = true;
   if (hudEl) hudEl.hidden = false;
+  if (resetBtnEl) resetBtnEl.hidden = false;
   cv.classList.remove('space', 'battle');
 }
 const sStage = () => t - space.t0;
 const px = v => v / cam.s;                   // screen pixels -> world units
 
+
 function startSpace() {
   space.on = true; space.stage = 'launch'; space.t0 = t;
   space.launchY = cam.y - H / 2 / cam.s;     // no clouds above this line
   dragging = false; slide = null; spawnQueue.length = 0; hintA = 0;
+  space.camF = { x: (toScreen(head.x, head.y).x / W), y: (toScreen(head.x, head.y).y / H) };
   cv.classList.add('space');
+  resetBtnEl.hidden = true;          // no accidental restarts mid-flight; the end card offers Start over
   sfxWhoosh(2.4, 300, 4000, 0.3);
 }
 function battleZoom() { return Math.max(14 / NECK, s0 * 0.45); }
+const CRUISE = 760;                          // screen px per second once out in space
 
 function spaceVelocity() {
   const st = space.stage, tt = sStage();
   if (st === 'launch') {
-    // curve hard to the right and blast off
+    // curve hard to the right and blast off; the speed never drops back
     aimT = Math.PI / 2 - 0.18;
     aim = lerp(aim, aimT, Math.min(1, 1 / 60 * 1.6));
-    const boost = 1 + 2.6 * smooth(0, 1.4, tt) - 2.9 * smooth(3.5, 5.5, tt);
-    const sp = 0.85 * maxSpeed() * Math.max(0.05, boost);
+    const sp = Math.max(0.85 * maxSpeed() * (1 + 1.6 * smooth(0, 1.4, tt)), px(CRUISE) * smooth(0, 2, tt));
     return { x: Math.sin(aim) * sp, y: -Math.cos(aim) * sp };
   }
-  if (st === 'ko') return { x: 0, y: 0 };
-  // drifting forward, neck trailing behind
-  aimT = Math.PI / 2 - 0.1 + 0.24 * Math.sin(t * 0.5);
+  // cruising fast, the neck snaking behind
+  aimT = Math.PI / 2 - 0.08 + (space.stage === 'ko' ? 0.35 : 0.2 * Math.sin(t * 0.9));
   aim = lerp(aim, aimT, Math.min(1, 1 / 60 * 2));
-  const sp = px(52);
+  const sp = px(CRUISE);
   return { x: Math.sin(aim) * sp, y: -Math.cos(aim) * sp };
 }
 function spaceCamera(dt) {
   const fight = space.stage !== 'launch';
-  const zs = fight ? battleZoom() : Math.max(14 / NECK, s0 * 0.38);
+  const zs = fight ? battleZoom() : Math.max(14 / NECK, s0 * 0.4);
   cam.s = lerp(cam.s, zs, Math.min(1, dt * 1.2));
-  const fx = fight ? 0.6 : 0.5, fy = fight ? 0.62 : 0.5;
-  const tx = head.x - (fx - 0.5) * W / cam.s, ty = head.y - (fy - 0.5) * H / cam.s;
-  const k = Math.min(1, dt * (space.stage === 'launch' ? 6 : 2.5));
-  cam.x = lerp(cam.x, tx, k); cam.y = lerp(cam.y, ty, k);
+  // the head eases to just right of centre and stays locked there however fast it goes
+  const k = Math.min(1, dt * 1.5);
+  space.camF.x = lerp(space.camF.x, 0.58, k); space.camF.y = lerp(space.camF.y, 0.56, k);
+  cam.x = head.x - (space.camF.x - 0.5) * W / cam.s;
+  cam.y = head.y - (space.camF.y - 0.5) * H / cam.s;
 }
-function collarFrame() {
-  const c = pointBack(COLLAR_BACK), a0 = pointBack(COLLAR_BACK + 25), a1 = pointBack(COLLAR_BACK - 25);
-  const a = Math.atan2(a1.x - a0.x, -(a1.y - a0.y));
-  // the turret goes on whichever side of the neck faces up
-  const side = Math.sin(a) > 0 ? -1 : 1;
-  const nx = Math.cos(a) * side, ny = Math.sin(a) * side;
-  return { c, a, side, turret: { x: c.x + nx * (HALF + 22), y: c.y + ny * (HALF + 22) } };
-}
-function screenToWorldPt(p) { return toWorld(p.x, p.y); }
 
 function updateSpace(dt) {
   const tt = sStage();
-  space.warp = space.stage === 'launch' ? smooth(0.3, 1.5, tt) * (1 - smooth(3.8, 5.5, tt)) : Math.max(0, space.warp - dt);
+  const wTarget = space.stage === 'launch' ? smooth(0.3, 1.5, tt) : 0.55;
+  space.warp = lerp(space.warp, wTarget, Math.min(1, dt * 2));
   space.earthT += dt;
   space.shake = Math.max(0, space.shake - dt * 3);
-  space.recoil = Math.max(0, space.recoil - dt * 8);
-  if (space.banner && t - space.banner.t0 > 1.8) space.banner = null;
+  space.recoil = Math.max(0, space.recoil - dt * 6);
+  if (space.beam && t - space.beam.t0 > 0.45) space.beam = null;
 
   if (space.stage === 'launch' && tt > 5.5) {
     space.stage = 'saucer'; space.t0 = t;
-    const hs = toScreen(head.x, head.y);
     space.saucer = { x: head.x + px(W), y: head.y - px(H * 0.7), phase: 'in' };
     sfxWhoosh(1.2, 1800, 500, 0.18);
   }
+  // the saucer flies along with the goose
+  if (space.saucer) { space.saucer.x += vel.x * dt; space.saucer.y += vel.y * dt; }
   if (space.stage === 'saucer') updateSaucer(dt, sStage());
   if (space.stage === 'battle') updateBattle(dt);
   if (space.stage === 'win' || space.stage === 'ko') {
@@ -1009,6 +1001,203 @@ function updateSpace(dt) {
     if (!space.cardShown && t > space.endAt) showCard();
   }
 }
+
+// how far into the fight, and how fierce it is (0..1 over 90 s)
+const BOSS_AT = 90;
+function battleTime() { return t - space.battleT0; }
+function spawnMonster(type, x, y) {
+  const d = MONSTERS[type];
+  let wx = x, wy = y;
+  if (wx == null) {
+    // from ahead (right edge) or above (top edge), the way the goose is flying
+    let sx, sy;
+    if (Math.random() < 0.55) { sx = W + 40; sy = rand(0.02, 0.62) * H; }
+    else { sx = rand(0.3, 1.0) * W; sy = -40; }
+    const p = toWorld(sx, sy); wx = p.x; wy = p.y;
+  }
+  const heat = clamp(battleTime() / BOSS_AT, 0, 1);
+  space.monsters.push({ type, x: wx, y: wy, r: px(d.r), hp: d.hp, max: d.hp, sp: d.sp * (1 + 0.3 * heat),
+    tS: Math.random() < 0.25 ? 0 : rand(40, Math.min(px(W * 0.55), 2400)), wob: rand(0, 6), flash: 0, born: t });
+}
+function nextSpawnType() {
+  const bt = battleTime(), r = Math.random();
+  const zip = smooth(8, 40, bt) * 0.35, brute = smooth(25, 70, bt) * 0.22;
+  return r < brute ? 'brute' : r < brute + zip ? 'zipper' : 'grunt';
+}
+
+function fireShot() {
+  const fr = collarFrame();
+  const a = space.turretA, L = 78;
+  const tip = { x: fr.turret.x + Math.cos(a) * L, y: fr.turret.y + Math.sin(a) * L };
+  const sp = px(620);
+  space.shots.push({ x: tip.x, y: tip.y, vx: Math.cos(a) * sp + vel.x, vy: Math.sin(a) * sp + vel.y, t0: t, r: px(9) });
+  space.recoil = 0.7;
+  sfxLaser();
+}
+// a charged release: a piercing beam that hits everything along its line
+function fireBeam(power) {
+  const fr = collarFrame();
+  const a = space.turretA, L = 78;
+  const ox = fr.turret.x + Math.cos(a) * L, oy = fr.turret.y + Math.sin(a) * L;
+  const dx = Math.cos(a), dy = Math.sin(a), width = px(16 + 30 * power);
+  const hitLine = (p, r) => { const u = (p.x - ox) * dx + (p.y - oy) * dy; if (u < -r) return false; return Math.abs((p.x - ox) * dy - (p.y - oy) * dx) < r + width / 2; };
+  const dmg = 2 + Math.round(3 * power);
+  for (const m of space.monsters.slice()) if (hitLine(m, m.r)) hurtMonster(m, dmg);
+  for (const g of space.globs.slice()) if (hitLine(g, g.r)) { space.globs.splice(space.globs.indexOf(g), 1); burst(g.x, g.y, '#B7F28A', 8, 200); }
+  if (space.boss && hitLine(space.boss, space.boss.r)) { space.boss.hp -= 4 + Math.round(8 * power); space.boss.flash = 1; if (space.boss.hp <= 0) bossDown(); }
+  space.beam = { t0: t, a, power };
+  space.recoil = 1.6; space.shake = 0.35 + 0.4 * power;
+  sfxBeam(power);
+}
+function hurtMonster(m, n) {
+  m.hp -= n; m.flash = 1;
+  if (m.hp <= 0) {
+    space.monsters.splice(space.monsters.indexOf(m), 1); space.kills++;
+    burst(m.x, m.y, MONSTERS[m.type].col, m.type === 'brute' ? 22 : 13, 300); sfxPopMonster(m.type === 'brute' ? 1.4 : 1);
+  } else sfxTink();
+}
+function chargeLevel() { return space.holding ? clamp((t - space.holdT0 - 0.18) / 1.1, 0, 1) : 0; }
+function pressFire(p) { space.reticle = p; space.holding = true; space.holdT0 = t; }
+function releaseFire() {
+  if (!space.holding) return;
+  const c = chargeLevel();
+  space.holding = false;
+  stopChargeSound();
+  if (space.stage !== 'battle') return;
+  if (c >= 0.3) fireBeam(c);
+  else if (space.fireCd <= 0) { fireShot(); space.fireCd = 0.16; }
+}
+
+function updateBattle(dt) {
+  const bt = battleTime();
+  // continuous stream, steadily denser
+  if (!space.boss || bt > BOSS_AT) {
+    space.spawnAcc += dt;
+    const gap = space.boss ? 3.2 : lerp(1.3, 0.5, smooth(0, BOSS_AT, bt));
+    while (space.spawnAcc > gap) {
+      space.spawnAcc -= gap;
+      const n = Math.random() < smooth(20, 80, bt) * 0.3 ? 3 : 1;   // little swarms
+      const type = nextSpawnType();
+      for (let i = 0; i < n; i++) spawnMonster(type);
+    }
+  }
+  if (!space.bossSpawned && bt >= BOSS_AT) {
+    space.bossSpawned = true;
+    const p = toWorld(W * 0.8, -200);
+    space.boss = { x: p.x, y: p.y, r: px(78), hp: 50, max: 50, spitAt: t + 2.6, spawnAt: t + 5, flash: 0, wob: 0, born: t };
+    sfxRoar();
+  }
+  // turret follows the reticle
+  const fr = collarFrame();
+  if (space.reticle) {
+    const r = screenToWorldPt(space.reticle);
+    const ta = Math.atan2(r.y - fr.turret.y, r.x - fr.turret.x);
+    space.turretA += angDiff(space.turretA, ta) * Math.min(1, dt * 18);
+  }
+  space.fireCd -= dt;
+  const c = chargeLevel();
+  if (c > 0) updateChargeSound(c);
+  updateBattleObjects(dt, true);
+}
+
+function updateBattleObjects(dt, live) {
+  // everything rides along with the goose's flight
+  const fx = vel.x * dt, fy = vel.y * dt;
+  for (const s of space.shots) { s.x += s.vx * dt; s.y += s.vy * dt; }
+  space.shots = space.shots.filter(s => t - s.t0 < 1.6);
+  for (const m of space.monsters.slice()) {
+    m.flash = Math.max(0, m.flash - dt * 6);
+    m.x += fx; m.y += fy;
+    if (!live) { m.y -= px(260) * dt; m.x += px(200) * dt; continue; }        // leaving
+    const target = m.tS === 0 ? head : pointBack(m.tS);
+    let dx = target.x - m.x, dy = target.y - m.y; const d = Math.hypot(dx, dy) || 1;
+    dx /= d; dy /= d;
+    const sp = px(m.sp);
+    let wx = 0, wy = 0;
+    if (m.type === 'zipper') { const w = Math.sin((t - m.born) * 6 + m.wob) * 0.9; wx = -dy * w; wy = dx * w; }
+    else if (m.type === 'grunt') { const w = Math.sin((t - m.born) * 2.5 + m.wob) * 0.35; wx = -dy * w; wy = dx * w; }
+    m.x += (dx + wx) * sp * dt; m.y += (dy + wy) * sp * dt;
+    if (neckHit(m, m.r * 0.8)) {
+      space.monsters.splice(space.monsters.indexOf(m), 1);
+      damage(MONSTERS[m.type].dmg, m);
+    }
+  }
+  const b = space.boss;
+  if (b) {
+    b.flash = Math.max(0, b.flash - dt * 6);
+    if (live) {
+      const e = smooth(0, 2.2, t - b.born);
+      const home = toWorld(W * 0.55 + Math.sin(t * (b.hp < b.max / 2 ? 0.9 : 0.55)) * W * 0.3, lerp(-160, H * 0.2, e));
+      b.x = lerp(b.x + fx, home.x, Math.min(1, dt * 2)); b.y = lerp(b.y + fy, home.y, Math.min(1, dt * 2));
+      const angry = b.hp < b.max / 2;
+      if (t > b.spitAt) {
+        b.spitAt = t + (angry ? 2.3 : 3.1);
+        for (let i = 0; i < (angry ? 3 : 2); i++) {
+          const tg = pointBack(rand(0, Math.min(px(W * 0.55), 2400)));
+          const a = Math.atan2(tg.y - b.y, tg.x - b.x) + rand(-0.12, 0.12);
+          space.globs.push({ x: b.x, y: b.y + b.r * 0.4, vx: Math.cos(a) * px(100), vy: Math.sin(a) * px(100), r: px(13), t0: t });
+        }
+        sfxSpit();
+      }
+      if (t > b.spawnAt) { b.spawnAt = t + (angry ? 5 : 6.5); for (let i = 0; i < 2; i++) spawnMonster(i ? 'zipper' : 'grunt', b.x + rand(-b.r, b.r), b.y); }
+    } else { b.x += fx; b.y += fy - px(200) * dt; }
+  }
+  for (const g of space.globs.slice()) {
+    g.x += g.vx * dt + fx; g.y += g.vy * dt + fy;
+    if (live && neckHit(g, g.r)) { space.globs.splice(space.globs.indexOf(g), 1); damage(1, g); }
+    else if (t - g.t0 > 9) space.globs.splice(space.globs.indexOf(g), 1);
+  }
+  if (!live) return;
+  for (const s of space.shots.slice()) {
+    let hit = false;
+    for (const m of space.monsters) {
+      if (dist(s, m) < m.r + s.r) { hit = true; hurtMonster(m, 1); break; }
+    }
+    if (!hit) for (const g of space.globs) {
+      if (dist(s, g) < g.r + s.r) { hit = true; space.globs.splice(space.globs.indexOf(g), 1); burst(g.x, g.y, '#B7F28A', 8, 200); sfxPopMonster(0.6); break; }
+    }
+    if (!hit && b && space.boss && dist(s, b) < b.r) {
+      hit = true; b.hp--; b.flash = 1; sfxTink();
+      if (b.hp <= 0) bossDown();
+    }
+    if (hit) space.shots.splice(space.shots.indexOf(s), 1);
+  }
+}
+function burst(x, y, col, n, spd) {
+  for (let i = 0; i < n; i++) {
+    const a = rand(0, Math.PI * 2), s = px(rand(spd * 0.3, spd));
+    const carry = space.on ? 0.75 : 0;
+    particles.push({ x, y, vx: Math.cos(a) * s + vel.x * carry, vy: Math.sin(a) * s + vel.y * carry, life: rand(0.35, 0.8), t0: t, sz: px(rand(2.5, 6)), c: col, nog: true });
+  }
+}
+function showCard() {
+  space.cardShown = true;
+  const won = space.stage === 'win';
+  const secs = Math.round(space.lasted || battleTime());
+  const time = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+  document.getElementById('cardTitle').textContent = won ? 'You saved the aliens!' : 'Knocked out!';
+  const first = won ? `Boss defeated in ${time}` : `Lasted ${time}`;
+  document.getElementById('cardStats').textContent = `${first} · ${space.kills} ${space.kills === 1 ? 'monster' : 'monsters'} shot · ${eaten} bread · neck ${fmtLen(neckM)}`;
+  document.getElementById('retryBtn').hidden = won;
+  document.getElementById('againBtn').textContent = won ? 'Play again' : 'Start over';
+  cardEl.hidden = false;
+}
+function retryFight() {
+  Object.assign(space, { stage: 'battle', t0: t, battleT0: t, shield: space.maxShield, monsters: [], shots: [], globs: [], boss: null, bossSpawned: false,
+    kills: 0, spawnAcc: 0, endAt: 0, cardShown: false, beam: null, holding: false, lasted: 0 });
+  cardEl.hidden = true;
+}
+
+function collarFrame() {
+  const c = pointBack(COLLAR_BACK), a0 = pointBack(COLLAR_BACK + 25), a1 = pointBack(COLLAR_BACK - 25);
+  const a = Math.atan2(a1.x - a0.x, -(a1.y - a0.y));
+  // the turret goes on whichever side of the neck faces up
+  const side = Math.sin(a) > 0 ? -1 : 1;
+  const nx = Math.cos(a) * side, ny = Math.sin(a) * side;
+  return { c, a, side, turret: { x: c.x + nx * (HALF + 22), y: c.y + ny * (HALF + 22) } };
+}
+function screenToWorldPt(p) { return toWorld(p.x, p.y); }
+
 
 function updateSaucer(dt, tt) {
   const s = space.saucer; if (!s) return;
@@ -1036,41 +1225,13 @@ function updateSaucer(dt, tt) {
     s.x -= px(260) * dt; s.y -= px(460) * dt;
     return;
   } else {
-    space.saucer = null; space.stage = 'battle'; space.t0 = t;
+    space.saucer = null; space.stage = 'battle'; space.t0 = t; space.battleT0 = t; space.spawnAcc = 0.8;
     space.barrel = 1; cv.classList.add('battle'); hudEl.hidden = true;
-    space.nextWaveAt = t + 0.6;
     return;
   }
   s.x = lerp(s.x, tx, k); s.y = lerp(s.y, ty, k);
 }
 
-function startWave(i) {
-  space.wave = i;
-  const w = WAVES[i];
-  space.banner = { txt: w.boss ? 'BOSS' : `WAVE ${i + 1}`, t0: t };
-  if (w.boss) {
-    const p = toWorld(W / 2, -px(200) * cam.s);
-    space.boss = { x: p.x, y: p.y, r: px(78), hp: 50, max: 50, spitAt: t + 2.6, spawnAt: t + 5, flash: 0, wob: 0, born: t };
-    sfxRoar();
-    return;
-  }
-  const list = [];
-  for (const k in w) for (let n = 0; n < w[k]; n++) list.push(k);
-  for (let i2 = list.length - 1; i2 > 0; i2--) { const j = Math.floor(Math.random() * (i2 + 1)); [list[i2], list[j]] = [list[j], list[i2]]; }
-  let at = t + 1.2;
-  const gap = 0.8 - i * 0.1;
-  space.queue = list.map((type, n) => ({ type, at: (at += (n % 3 === 0 ? gap * 1.8 : gap * 0.35)) }));
-}
-function spawnMonster(type, x, y) {
-  const d = MONSTERS[type];
-  let wx = x, wy = y;
-  if (wx == null) {
-    const sx = rand(0.05, 0.95) * W;
-    const p = toWorld(sx, -40); wx = p.x; wy = p.y;
-  }
-  space.monsters.push({ type, x: wx, y: wy, r: px(d.r), hp: d.hp, max: d.hp, sp: d.sp * (1 + 0.08 * Math.max(0, space.wave)),
-    tS: Math.random() < 0.25 ? 0 : rand(40, Math.min(px(W * 0.65), 2400)), wob: rand(0, 6), flash: 0, born: t });
-}
 
 // distance from a point to the visible neck (and head)
 function neckHit(p, rad) {
@@ -1096,15 +1257,10 @@ function damage(n, at) {
   sfxCollarHit();
   burst(at.x, at.y, '#F6E27A', 10, 260);
   if (space.shield <= 0 && space.stage === 'battle') {
+    space.lasted = battleTime(); space.holding = false; stopChargeSound();
     space.stage = 'ko'; space.t0 = t; space.endAt = t + 2.2;
     honk(0.8); setTimeout(() => honk(0.7), 380);
     burst(collarFrame().c.x, collarFrame().c.y, '#9AA3AD', 26, 420);
-  }
-}
-function burst(x, y, col, n, spd) {
-  for (let i = 0; i < n; i++) {
-    const a = rand(0, Math.PI * 2), s = px(rand(spd * 0.3, spd));
-    particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(0.35, 0.8), t0: t, sz: px(rand(2.5, 6)), c: col, nog: true });
   }
 }
 function firework() {
@@ -1113,141 +1269,30 @@ function firework() {
   sfxPopMonster(0.5);
 }
 
-function fire() {
-  const fr = collarFrame();
-  const a = space.turretA, L = 78;
-  const tip = { x: fr.turret.x + Math.cos(a) * L, y: fr.turret.y + Math.sin(a) * L };
-  const sp = px(1150);
-  space.shots.push({ x: tip.x, y: tip.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, t0: t });
-  space.recoil = 1;
-  sfxLaser();
-}
 
-function updateBattle(dt) {
-  if (space.wave < 0 || (!space.queue.length && !space.monsters.length && !space.boss && space.wave < WAVES.length - 1)) {
-    if (!space.nextWaveAt) space.nextWaveAt = t + 1.6;
-    if (t >= space.nextWaveAt) { space.nextWaveAt = 0; startWave(space.wave + 1); }
-  }
-  while (space.queue.length && space.queue[0].at <= t) spawnMonster(space.queue.shift().type);
-  // turret follows the reticle
-  const fr = collarFrame();
-  if (space.reticle) {
-    const r = screenToWorldPt(space.reticle);
-    const ta = Math.atan2(r.y - fr.turret.y, r.x - fr.turret.x);
-    space.turretA += angDiff(space.turretA, ta) * Math.min(1, dt * 18);
-  }
-  space.fireCd -= dt;
-  if (space.firing && space.fireCd <= 0) { fire(); space.fireCd = 0.13; }
-  updateBattleObjects(dt, true);
-}
 
-function updateBattleObjects(dt, live) {
-  // shots
-  for (const s of space.shots) { s.x += s.vx * dt; s.y += s.vy * dt; }
-  space.shots = space.shots.filter(s => t - s.t0 < 1.3);
-  // monsters
-  for (const m of space.monsters.slice()) {
-    m.flash = Math.max(0, m.flash - dt * 6);
-    if (!live) { m.y -= px(260) * dt; continue; }        // fleeing / leaving
-    const target = m.tS === 0 ? head : pointBack(m.tS);
-    let dx = target.x - m.x, dy = target.y - m.y; const d = Math.hypot(dx, dy) || 1;
-    dx /= d; dy /= d;
-    const sp = px(m.sp);
-    let wx = 0, wy = 0;
-    if (m.type === 'zipper') { const w = Math.sin((t - m.born) * 6 + m.wob) * 0.9; wx = -dy * w; wy = dx * w; }
-    else if (m.type === 'grunt') { const w = Math.sin((t - m.born) * 2.5 + m.wob) * 0.35; wx = -dy * w; wy = dx * w; }
-    m.x += (dx + wx) * sp * dt; m.y += (dy + wy) * sp * dt;
-    if (neckHit(m, m.r * 0.8)) {
-      space.monsters.splice(space.monsters.indexOf(m), 1);
-      damage(MONSTERS[m.type].dmg, m);
-    }
-  }
-  // boss and its spit
-  const b = space.boss;
-  if (b) {
-    b.flash = Math.max(0, b.flash - dt * 6);
-    if (live) {
-      const e = smooth(0, 2.2, t - b.born);
-      const home = toWorld(W / 2 + Math.sin(t * (b.hp < b.max / 2 ? 0.9 : 0.55)) * W * 0.3, lerp(-160, H * 0.2, e));
-      b.x = lerp(b.x, home.x, Math.min(1, dt * 2)); b.y = lerp(b.y, home.y, Math.min(1, dt * 2));
-      const angry = b.hp < b.max / 2;
-      if (t > b.spitAt) {
-        b.spitAt = t + (angry ? 2.3 : 3.1);
-        for (let i = 0; i < (angry ? 3 : 2); i++) {
-          const tg = pointBack(rand(0, Math.min(px(W * 0.6), 2400)));
-          const a = Math.atan2(tg.y - b.y, tg.x - b.x) + rand(-0.12, 0.12);
-          space.globs.push({ x: b.x, y: b.y + b.r * 0.4, vx: Math.cos(a) * px(100), vy: Math.sin(a) * px(100), r: px(13), t0: t });
-        }
-        sfxSpit();
-      }
-      if (t > b.spawnAt) { b.spawnAt = t + (angry ? 5 : 6.5); for (let i = 0; i < 2; i++) spawnMonster(i ? 'zipper' : 'grunt', b.x + rand(-b.r, b.r), b.y); }
-    } else b.y -= px(200) * dt;
-  }
-  for (const g of space.globs.slice()) {
-    g.x += g.vx * dt; g.y += g.vy * dt;
-    if (live && neckHit(g, g.r)) { space.globs.splice(space.globs.indexOf(g), 1); damage(1, g); }
-    else if (t - g.t0 > 9) space.globs.splice(space.globs.indexOf(g), 1);
-  }
-  if (!live) return;
-  // shots hitting things
-  for (const s of space.shots.slice()) {
-    let hit = false;
-    for (const m of space.monsters) {
-      if (dist(s, m) < m.r + px(6)) {
-        hit = true; m.hp--; m.flash = 1;
-        if (m.hp <= 0) {
-          space.monsters.splice(space.monsters.indexOf(m), 1); space.kills++;
-          burst(m.x, m.y, MONSTERS[m.type].col, m.type === 'brute' ? 22 : 13, 300); sfxPopMonster(m.type === 'brute' ? 1.4 : 1);
-        } else sfxTink();
-        break;
-      }
-    }
-    if (!hit) for (const g of space.globs) {
-      if (dist(s, g) < g.r + px(6)) { hit = true; space.globs.splice(space.globs.indexOf(g), 1); burst(g.x, g.y, '#B7F28A', 8, 200); sfxPopMonster(0.6); break; }
-    }
-    if (!hit && b && dist(s, b) < b.r) {
-      hit = true; b.hp--; b.flash = 1; sfxTink();
-      if (b.hp <= 0) bossDown();
-    }
-    if (hit) space.shots.splice(space.shots.indexOf(s), 1);
-  }
-}
 function bossDown() {
   const b = space.boss; space.boss = null; space.kills++;
   for (let i = 0; i < 6; i++) setTimeout(() => { burst(b.x + rand(-b.r, b.r), b.y + rand(-b.r, b.r), ['#B57BE0', '#F6E27A', '#E0645A'][i % 3], 26, 420); sfxPopMonster(1.6); space.shake = 0.8; }, i * 170);
   for (const m of space.monsters) burst(m.x, m.y, MONSTERS[m.type].col, 10, 260);
   space.kills += space.monsters.length;
-  space.monsters = []; space.globs = []; space.queue = [];
+  space.lasted = battleTime(); space.holding = false; stopChargeSound();
+  space.monsters = []; space.globs = [];
   space.stage = 'win'; space.t0 = t; space.endAt = t + 5.5; space.bubble = null;
   space.saucer = { x: head.x + px(W), y: head.y - px(H * 0.8) };
   setTimeout(() => { sfxWhoosh(1.2, 1800, 500, 0.18); }, 700);
   setTimeout(sfxWin, 1300);
 }
 
-function showCard() {
-  space.cardShown = true;
-  const won = space.stage === 'win';
-  document.getElementById('cardTitle').textContent = won ? 'You saved the aliens!' : 'Knocked out!';
-  const waveTxt = won ? `All ${WAVES.length} waves cleared` : `Reached wave ${space.wave + 1} of ${WAVES.length}`;
-  document.getElementById('cardStats').textContent = `${waveTxt} · ${space.kills} ${space.kills === 1 ? 'monster' : 'monsters'} shot · ${eaten} bread · neck ${fmtLen(neckM)}`;
-  document.getElementById('retryBtn').hidden = won;
-  document.getElementById('againBtn').textContent = won ? 'Play again' : 'Start over';
-  cardEl.hidden = false;
-}
-function retryFight() {
-  Object.assign(space, { stage: 'battle', t0: t, shield: space.maxShield, wave: -1, queue: [], monsters: [], shots: [], globs: [], boss: null,
-    kills: 0, nextWaveAt: t + 0.8, endAt: 0, cardShown: false, banner: null });
-  cardEl.hidden = true;
-}
 document.getElementById('retryBtn').addEventListener('click', () => { initAudio(); retryFight(); });
 document.getElementById('againBtn').addEventListener('click', () => { initAudio(); reset(); });
 
 /* ---- space drawing ---- */
 function drawSpaceSky() {
   // the Earth falling away behind you
-  const e = easeOutCubic(clamp(space.earthT / 7, 0, 1));
-  const R = lerp(H * 3, H * 0.3, e);
-  const cx = lerp(W * 0.35, W * 0.16, e), cy = H + R * lerp(0.88, 0.45, e);
+  const e = easeOutCubic(clamp(space.earthT / 7, 0, 1)), far = clamp((space.earthT - 7) / 25, 0, 1);
+  const R = lerp(H * 3, H * 0.3, e) * (1 - 0.85 * far);
+  const cx = lerp(W * 0.35, W * 0.16, e) - far * W * 0.5, cy = H + R * lerp(0.88, 0.45, e) - far * H * 0.15;
   ctx.save();
   ctx.beginPath(); ctx.arc(cx, cy, R * 1.06, 0, Math.PI * 2); ctx.fillStyle = 'rgba(140,200,255,0.18)'; ctx.fill();
   ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fillStyle = '#3E7CC6'; ctx.fill();
@@ -1292,14 +1337,27 @@ function drawSpaceWorld() {
   }
   for (const m of space.monsters) drawMonster(m, ol);
   if (space.boss) drawBoss(space.boss, ol);
-  // shots
-  ctx.lineCap = 'round';
-  for (const s of space.shots) {
-    const l = 0.022;
-    ctx.strokeStyle = 'rgba(255,240,150,0.35)'; ctx.lineWidth = px(9);
-    ctx.beginPath(); ctx.moveTo(s.x - s.vx * l, s.y - s.vy * l); ctx.lineTo(s.x, s.y); ctx.stroke();
-    ctx.strokeStyle = '#FFF4B0'; ctx.lineWidth = px(4);
-    ctx.beginPath(); ctx.moveTo(s.x - s.vx * l, s.y - s.vy * l); ctx.lineTo(s.x, s.y); ctx.stroke();
+  // shots: fat glowing bolts
+  for (const sh of space.shots) {
+    const r = sh.r, ang = Math.atan2(sh.vy - vel.y, sh.vx - vel.x);
+    ctx.save(); ctx.translate(sh.x, sh.y); ctx.rotate(ang);
+    ctx.beginPath(); ctx.ellipse(-r * 0.8, 0, r * 2.6, r * 1.5, 0, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255,230,120,0.22)'; ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0, 0, r * 1.6, r, 0, 0, Math.PI * 2); ctx.fillStyle = '#FFE680'; ctx.fill();
+    ctx.strokeStyle = C.ink; ctx.lineWidth = ol * 0.7; ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(r * 0.3, -r * 0.2, r * 0.7, r * 0.4, 0, 0, Math.PI * 2); ctx.fillStyle = '#FFFBEA'; ctx.fill();
+    ctx.restore();
+  }
+  // charged beam
+  if (space.beam) {
+    const fr = collarFrame(), bm = space.beam, p = (t - bm.t0) / 0.45;
+    const L = 78, ox = fr.turret.x + Math.cos(bm.a) * L, oy = fr.turret.y + Math.sin(bm.a) * L;
+    const len = px(Math.hypot(W, H) * 1.5), wdt = px(16 + 30 * bm.power) * (1 - p * p);
+    ctx.save(); ctx.translate(ox, oy); ctx.rotate(bm.a); ctx.lineCap = 'round';
+    for (const [col, k] of [['rgba(255,214,90,0.25)', 2.2], [C.ink, 1.15], ['#FFD65A', 1], ['#FFF8D8', 0.45]]) {
+      ctx.strokeStyle = col; ctx.lineWidth = wdt * k;
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(len, 0); ctx.stroke();
+    }
+    ctx.restore();
   }
   if (space.saucer) drawSaucer(space.saucer, ol);
 }
@@ -1350,7 +1408,20 @@ function drawCollar(ol) {
   ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.fillStyle = '#B4BCC5'; ctx.fill();
   ctx.strokeStyle = C.ink; ctx.lineWidth = ol; ctx.stroke();
   ctx.beginPath(); ctx.arc(-8, -9, 9, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fill();
-  ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fillStyle = space.firing ? '#FFE680' : '#FF6B5E'; ctx.fill();
+  ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fillStyle = space.holding ? '#FFE680' : '#FF6B5E'; ctx.fill();
+  const ch = chargeLevel();
+  if (ch > 0) {
+    const mx = Math.cos(space.turretA) * 82, my = Math.sin(space.turretA) * 82;
+    const rr = 8 + ch * 34 + Math.sin(t * 40) * 2 * ch;
+    ctx.beginPath(); ctx.arc(mx, my, rr * 1.7, 0, Math.PI * 2); ctx.fillStyle = `rgba(255,214,90,${0.18 + 0.2 * ch})`; ctx.fill();
+    ctx.beginPath(); ctx.arc(mx, my, rr, 0, Math.PI * 2); ctx.fillStyle = ch >= 1 ? '#FFF8D8' : '#FFD65A'; ctx.fill();
+    ctx.strokeStyle = C.ink; ctx.lineWidth = ol * 0.7; ctx.stroke();
+    // sparks pulled into the muzzle
+    for (let i = 0; i < 6; i++) {
+      const a = t * 3 + i * 1.05, d = (1 - ((t * 2.2 + i * 0.37) % 1)) * (60 + 40 * ch);
+      ctx.beginPath(); ctx.arc(mx + Math.cos(a) * d, my + Math.sin(a) * d, 3 + 2 * ch, 0, Math.PI * 2); ctx.fillStyle = '#FFE680'; ctx.fill();
+    }
+  }
   ctx.restore();
 }
 
@@ -1492,37 +1563,24 @@ function drawSpaceUI() {
     ctx.beginPath(); ctx.roundRect(x0 + 68 + i * 10, y0 + 10, 7, 16, 2);
     ctx.fillStyle = i < space.shield ? (lit > 0.5 ? '#4CC77A' : lit > 0.25 ? '#E8B33C' : '#E5533F') : 'rgba(59,36,22,0.15)'; ctx.fill();
   }
-  const wtxt = `WAVE ${Math.max(1, space.wave + 1)} / ${WAVES.length}`;
-  ctx.font = `600 14px ${font}`;
-  const ww = ctx.measureText(wtxt).width + 24;
-  ctx.beginPath(); ctx.roundRect(x0, y0 + 44, ww, 30, 15); ctx.fillStyle = '#F3E4C9'; ctx.fill(); ctx.stroke();
-  ctx.fillStyle = C.ink; ctx.fillText(wtxt, x0 + 12, y0 + 59.5);
   const ktxt = `${space.kills} shot`;
+  ctx.font = `600 14px ${font}`;
   const kw = ctx.measureText(ktxt).width + 24;
-  ctx.beginPath(); ctx.roundRect(x0 + ww + 8, y0 + 44, kw, 30, 15); ctx.fillStyle = '#F3E4C9'; ctx.fill(); ctx.stroke();
-  ctx.fillStyle = C.ink; ctx.fillText(ktxt, x0 + ww + 20, y0 + 59.5);
+  ctx.beginPath(); ctx.roundRect(x0, y0 + 44, kw, 30, 15); ctx.fillStyle = '#F3E4C9'; ctx.fill(); ctx.stroke();
+  ctx.fillStyle = C.ink; ctx.fillText(ktxt, x0 + 12, y0 + 59.5);
   // boss health
   if (space.boss) {
     const b = space.boss, bw = Math.min(W - 40, 300), bx = (W - bw) / 2, by = 104;
     ctx.beginPath(); ctx.roundRect(bx, by, bw, 14, 7); ctx.fillStyle = 'rgba(243,228,201,0.9)'; ctx.fill(); ctx.stroke();
     ctx.beginPath(); ctx.roundRect(bx + 3, by + 3, (bw - 6) * b.hp / b.max, 8, 4); ctx.fillStyle = '#D45BA0'; ctx.fill();
   }
-  // wave banner
-  if (space.banner) {
-    const p = (t - space.banner.t0) / 1.8;
-    ctx.globalAlpha = p < 0.15 ? p / 0.15 : p > 0.75 ? (1 - p) / 0.25 : 1;
-    ctx.font = `700 44px ${font}`; ctx.textAlign = 'center';
-    ctx.lineJoin = 'round'; ctx.lineWidth = 8; ctx.strokeStyle = C.ink;
-    const sc = 1 + 0.15 * (1 - Math.min(1, p * 5));
-    ctx.translate(W / 2, H * 0.4); ctx.scale(sc, sc);
-    ctx.strokeText(space.banner.txt, 0, 0); ctx.fillStyle = '#F6E27A'; ctx.fillText(space.banner.txt, 0, 0);
-  }
   ctx.restore();
   // targeting reticle
   if (space.reticle && space.stage === 'battle') {
     const { x, y } = space.reticle;
-    ctx.save(); ctx.translate(x, y); ctx.rotate(space.firing ? t * 4 : 0);
-    const r = space.firing ? 15 : 18;
+    const ch = chargeLevel();
+    ctx.save(); ctx.translate(x, y); ctx.rotate(space.holding ? t * (2 + ch * 8) : 0);
+    const r = 18 - ch * 6;
     for (const [col, lw] of [[C.ink, 6], ['#FFF4B0', 2.5]]) {
       ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.lineCap = 'round';
       ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
@@ -1544,11 +1602,44 @@ function sfxWhoosh(dur, f0, f1, amp) {
   const g = AC.createGain(); g.gain.setValueAtTime(0.0001, n); g.gain.exponentialRampToValueAtTime(amp, n + dur * 0.4); g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
   src.connect(bp); bp.connect(g); g.connect(master); src.start(n); src.stop(n + dur + 0.05);
 }
+let chargeNode = null;
+function updateChargeSound(c) {
+  if (!AC) return;
+  const n = AC.currentTime;
+  if (!chargeNode) {
+    const o = AC.createOscillator(); o.type = 'sawtooth';
+    const o2 = AC.createOscillator(); o2.type = 'sine';
+    const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 6;
+    const g = AC.createGain(); g.gain.value = 0;
+    o.connect(lp); o2.connect(lp); lp.connect(g); g.connect(master); o.start(); o2.start();
+    chargeNode = { o, o2, lp, g };
+  }
+  chargeNode.o.frequency.setTargetAtTime(110 + 500 * c, n, 0.03);
+  chargeNode.o2.frequency.setTargetAtTime(220 + 1000 * c + (c >= 1 ? Math.sin(n * 40) * 40 : 0), n, 0.03);
+  chargeNode.lp.frequency.setTargetAtTime(400 + 3000 * c, n, 0.03);
+  chargeNode.g.gain.setTargetAtTime(0.05 + 0.1 * c, n, 0.03);
+}
+function stopChargeSound() {
+  if (!chargeNode) return;
+  const cn = chargeNode, n = AC.currentTime; chargeNode = null;
+  cn.g.gain.setTargetAtTime(0, n, 0.02); cn.o.stop(n + 0.15); cn.o2.stop(n + 0.15);
+}
+function sfxBeam(p) {
+  if (!AC) return;
+  const n = AC.currentTime, dur = 0.5 + 0.4 * p;
+  const o = AC.createOscillator(); o.type = 'sawtooth';
+  o.frequency.setValueAtTime(900 + 600 * p, n); o.frequency.exponentialRampToValueAtTime(70, n + dur);
+  const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(5000, n); lp.frequency.exponentialRampToValueAtTime(300, n + dur);
+  const g = AC.createGain(); g.gain.setValueAtTime(0.3, n); g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+  o.connect(lp); lp.connect(g); g.connect(master); o.start(n); o.stop(n + dur + 0.02);
+  sfxWhoosh(0.5, 4000, 300, 0.25 * (0.5 + p));
+  sfxCollarHit();
+}
 function sfxLaser() {
   if (!AC) return;
   const n = AC.currentTime, o = AC.createOscillator(); o.type = 'square';
-  o.frequency.setValueAtTime(1300, n); o.frequency.exponentialRampToValueAtTime(260, n + 0.09);
-  const g = AC.createGain(); g.gain.setValueAtTime(0.09, n); g.gain.exponentialRampToValueAtTime(0.0001, n + 0.1);
+  o.frequency.setValueAtTime(700, n); o.frequency.exponentialRampToValueAtTime(140, n + 0.14);
+  const g = AC.createGain(); g.gain.setValueAtTime(0.12, n); g.gain.exponentialRampToValueAtTime(0.0001, n + 0.15);
   const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3500;
   o.connect(lp); lp.connect(g); g.connect(master); o.start(n); o.stop(n + 0.11);
 }
@@ -1672,7 +1763,7 @@ function drawSky() {
     }
     // the moon, barely moving
     ctx.globalAlpha = starA;
-    const mx = W * 0.78, my = H * 0.2 + Math.max(0, 52000 - camAlt) * 0.004;
+    const mx = W * 0.78 - (space.on ? space.earthT * W * 0.06 : 0), my = H * 0.2 + Math.max(0, 52000 - camAlt) * 0.004;
     ctx.beginPath(); ctx.arc(mx, my, 30, 0, Math.PI * 2); ctx.fillStyle = '#FFF2CF'; ctx.fill();
     ctx.lineWidth = 2.5; ctx.strokeStyle = C.ink; ctx.stroke();
     ctx.fillStyle = 'rgba(59,36,22,0.12)';
@@ -2120,7 +2211,7 @@ function frame(now) {
 }
 
 if (/[?&]debug\b/.test(location.search)) window.__gooseJump = m => { neckM = m; eaten = Math.max(eaten, 60); };
-if (/[?&]debug\b/.test(location.search)) window.__goose = () => ({ space: { st: sStage(), cp: space.collarP, stage: space.stage, wave: space.wave, shield: space.shield, kills: space.kills, monsters: space.monsters.map(m => toScreen(m.x, m.y)), boss: space.boss && toScreen(space.boss.x, space.boss.y), globs: space.globs.map(g => toScreen(g.x, g.y)) }, t, eaten, neckM, heightM, started, head: { ...head }, cam: { ...cam }, breads: breads.map(b => ({ x: b.x, y: b.y })), mode: mus && mus.mode, lv: mus && { ...mus.lv } });
+if (/[?&]debug\b/.test(location.search)) window.__goose = () => ({ space: { st: sStage(), cp: space.collarP, stage: space.stage, shield: space.shield, bt: space.battleT0 ? battleTime() : 0, kills: space.kills, monsters: space.monsters.map(m => toScreen(m.x, m.y)), boss: space.boss && toScreen(space.boss.x, space.boss.y), globs: space.globs.map(g => toScreen(g.x, g.y)) }, t, eaten, neckM, heightM, started, head: { ...head }, cam: { ...cam }, breads: breads.map(b => ({ x: b.x, y: b.y })), mode: mus && mus.mode, lv: mus && { ...mus.lv } });
 resize();
 reset();
 requestAnimationFrame(frame);
